@@ -49,8 +49,9 @@ type key struct {
 }
 
 type DataEvent struct {
-	Data  interface{} // --> can be any value
-	Topic string
+	Data            interface{} // --> can be any value
+	Topic           string
+	ResponseChannel chan string
 }
 
 // DataChannel is a channel which can accept a DataEvent
@@ -59,10 +60,19 @@ type DataChannel chan DataEvent
 // DataChannelSlice is a slice of DataChannels
 type DataChannelSlice []DataChannel
 
+// StringSlice is a slice of strings
+type StringSlice []string
+
 // Broker stores the information about subscribers interested for // a particular topic
 type Broker struct {
-	subscribersCtx map[key]DataChannelSlice
-	subscribers    map[string]DataChannelSlice
+	subscribersCtx    map[key]DataChannelSlice
+	subscribers       map[string]DataChannelSlice
+
+	botIdChannelMap   map[string]DataChannel
+	botTopicCtxIdMap  map[key]StringSlice
+	botTopicIdMap     map[string]StringSlice
+	botChannelIdMap   map[chan DataEvent]string
+
 	rm             sync.RWMutex // mutex protect broker against concurrent access from read and write
 }
 
@@ -78,11 +88,20 @@ func (eb *Broker) Subscribe(bot Bot, ch DataChannel) {
 			Topic:  bot.Topic,
 			Sector: bot.CurrentSector,
 		}
+
 		if prev, found := eb.subscribersCtx[internalKey]; found {
 			eb.subscribersCtx[internalKey] = append(prev, ch)
 		} else {
 			eb.subscribersCtx[internalKey] = append([]DataChannel{}, ch)
 		}
+
+		//create mapping botTopicCtx-> botId
+		if prev, found := eb.botTopicCtxIdMap[internalKey]; found {
+			eb.botTopicCtxIdMap[internalKey] = append(prev, bot.Id)
+		} else {
+			eb.botTopicCtxIdMap[internalKey] = append([]string{}, bot.Id)
+		}
+
 	} else {
 		// Without context
 		if prev, found := eb.subscribers[bot.Topic]; found {
@@ -90,12 +109,36 @@ func (eb *Broker) Subscribe(bot Bot, ch DataChannel) {
 		} else {
 			eb.subscribers[bot.Topic] = append([]DataChannel{}, ch)
 		}
+
+		//create mapping botTopic -> botId
+		if prev, found := eb.botTopicIdMap[bot.Topic]; found {
+			eb.botTopicIdMap[bot.Topic] = append(prev, bot.Id)
+		} else {
+			eb.botTopicIdMap[bot.Topic] = append([]string{}, bot.Id)
+		}
 	}
+
+	//create mapping botId -> botChannel
+	eb.botIdChannelMap[bot.Id] = ch
+
+
+	//create mapping botChannel -> botId
+	eb.botChannelIdMap[ch] = bot.Id
+
+
 	eb.rm.Unlock()
 }
 
 func (eb *Broker) Publish(sensor Sensor, data interface{}) {
+
+	//TODO come facciamo a lascaire l'event broker viable per altri sensori che vogliono pubblicare senza killare la main subroutine? magari lo circoscriviamo solo
+	//TODO alla creazione delle subroutine cosi locka gli array in uso e quando non servono piu lo slockiamo : unlock-->wait main subroutine e dopo l'unlock può
+	//TODO servire altri sensori 1
+
 	eb.rm.RLock()
+
+	message := data.(string)
+
 	if contextLock == true {
 		var internalKey = key{
 			Topic:  sensor.Type,
@@ -105,25 +148,133 @@ func (eb *Broker) Publish(sensor Sensor, data interface{}) {
 			// this is done because the slices refer to same array even though they are passed by value
 			// thus we are creating a new slice with our elements thus preserve locking correctly.
 			channels := append(DataChannelSlice{}, chans...)
-			go func(data DataEvent, dataChannelSlices DataChannelSlice) {
-				for _, ch := range dataChannelSlices {
-					ch <- data
-				}
-				//TODO ci metto un array di boolean uno per ogni channel dei bot e faccio mettere a true il valore se ha ricevuto il messaggio
-				//ritrasmetto i false
 
-			}(DataEvent{Data: data, Topic: sensor.Type}, channels)
+			//main subroutine which spaws a subroutine for every bot who needs to be notificated and awaits
+			//for every subroutine to receive its pwn ack
+			go func(data DataEvent, dataChannelSlices DataChannelSlice, message string) {
+
+				var wg sync.WaitGroup
+				var botIdsArray []string
+
+				if botIds, found := eb.botTopicCtxIdMap[internalKey]; found {
+
+					botIdsArray = append(StringSlice{}, botIds...)
+					writeBotIdsAndMessage(botIdsArray, message )
+
+				}else{
+					fmt.Printf("No bots are subscribed to this sensor type : %v with ctx : %v \n",
+						sensor.Type, sensor.CurrentSector )
+				}
+
+				//for every bot there is a subroutine which sends the message to it and awaits for its ack
+				for _, ch := range dataChannelSlices {
+
+					wg.Add(1)
+
+					go func(ch chan DataEvent , message string, data DataEvent, wg *sync.WaitGroup) {
+
+						myChan := make(chan string)
+						data.ResponseChannel = myChan
+
+						ch <- data
+						//subroutine awaits for the ack from the bot
+						for {
+
+							select {
+
+							case response := <-myChan:
+								removeResilienceEntry(response, message)
+								break
+
+							case <-time.After(5 * time.Second):
+								//TODO lasciare aperto o chiudere il canale e crearne uno nuovo? Ho optato per la seconda per evitare sprechi memoria 2
+								close(myChan)
+								myChan := make(chan string)
+								data.ResponseChannel = myChan
+								ch <- data
+							}
+
+						}
+
+						fmt.Println("Ack received from bot !" )
+						defer wg.Done()
+
+					}(ch, message, DataEvent{Data: data, Topic: sensor.Type}, &wg)
+
+				}
+
+				//TODO magari unlock qui dell' eb va piu che bene 1
+				//wait all subroutines have received their acks
+				wg.Wait()
+
+			}(DataEvent{Data: data, Topic: sensor.Type}, channels, message)
+
 		}
+
 	} else {
+
 		if chans, found := eb.subscribers[sensor.Type]; found {
 			// this is done because the slices refer to same array even though they are passed by value
 			// thus we are creating a new slice with our elements thus preserve locking correctly.
 			channels := append(DataChannelSlice{}, chans...)
-			go func(data DataEvent, dataChannelSlices DataChannelSlice) {
-				for _, ch := range dataChannelSlices {
-					ch <- data
+			//main subroutine which spaws a subroutine for every bot who needs to be notificated and awaits
+			//for every subroutine to receive its pwn ack
+			go func(data DataEvent, dataChannelSlices DataChannelSlice, message string) {
+
+				var wg sync.WaitGroup
+				var botIdsArray []string
+
+				if botIds, found := eb.botTopicIdMap[sensor.Type]; found {
+
+					botIdsArray = append(StringSlice{}, botIds...)
+					writeBotIdsAndMessage(botIdsArray, message )
+
+				}else{
+					fmt.Println("No bots are subscribed to this sensor type : " + sensor.Type + "\n" )
 				}
-			}(DataEvent{Data: data, Topic: sensor.Type}, channels)
+
+				//for every bot there is a subroutine which sends the message to it and awaits for its ack
+				for _, ch := range dataChannelSlices {
+
+					wg.Add(1)
+
+					go func(ch chan DataEvent , message string, data DataEvent, wg *sync.WaitGroup) {
+
+						myChan := make(chan string)
+						data.ResponseChannel = myChan
+
+						ch <- data
+						//subroutine awaits for the ack from the bot
+						for {
+
+							select {
+
+							case response := <-myChan:
+								removeResilienceEntry(response, message)
+								break
+
+							case <-time.After(5 * time.Second):
+								//TODO lasciare aperto o chiudere il canale e crearne uno nuovo? Ho optato per la seconda per evitare sprechi memoria 2
+								close(myChan)
+								myChan := make(chan string)
+								data.ResponseChannel = myChan
+								ch <- data
+							}
+
+						}
+
+						fmt.Println("Ack received from bot !" )
+						defer wg.Done()
+
+					}(ch, message, DataEvent{Data: data, Topic: sensor.Type}, &wg)
+
+				}
+
+				//TODO magari unlock qui dell' eb va piu che bene 1
+				//wait all subroutines have received their acks
+				wg.Wait()
+
+			}(DataEvent{Data: data, Topic: sensor.Type}, channels, message)
 		}
 	}
 	eb.rm.RUnlock()
@@ -133,6 +284,10 @@ func (eb *Broker) Publish(sensor Sensor, data interface{}) {
 var eb = &Broker{
 	subscribers:    map[string]DataChannelSlice{},
 	subscribersCtx: map[key]DataChannelSlice{},
+	botIdChannelMap:   map[string]DataChannel{},
+	botTopicCtxIdMap:  map[key]StringSlice{},
+	botTopicIdMap:     map[string]StringSlice{},
+	botChannelIdMap:   map[chan DataEvent]string{},
 }
 
 /*  MAYBE FUTURE IMPLEMENTATION?

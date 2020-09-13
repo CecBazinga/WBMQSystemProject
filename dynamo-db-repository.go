@@ -68,6 +68,36 @@ func GetDBBots() ([]Bot, error) {
 	return botslist, nil
 }
 
+
+// return the list of botIds and their own messages which need to be retransmitted
+func  GetResilienceEntries() ([]resilienceEntry, error) {
+	client := initDBClient()
+	params := &dynamodb.ScanInput{
+		TableName: aws.String("resilience"),
+	}
+
+	fmt.Println("Params are" , params)
+	result, err := client.Scan(params)
+	if err != nil {
+		fmt.Println("Step A")
+		fmt.Println(err)
+		return nil, err
+	}
+
+	var resilienceList = []resilienceEntry{}
+	for _, i := range result.Items {
+		entry := resilienceEntry{}
+		err = dynamodbattribute.UnmarshalMap(i, &entry)
+		if err != nil {
+			fmt.Println("Step B")
+			fmt.Println(err)
+			return nil, err
+		}
+		resilienceList = append(resilienceList, entry)
+	}
+	return resilienceList, nil
+}
+
 //add sensor to DB
 func AddDBSensor(sensor Sensor) {
 	client := initDBClient()
@@ -81,6 +111,31 @@ func AddDBSensor(sensor Sensor) {
 		fmt.Println(err.Error())
 	}
 }
+
+
+//add every bot id and the message to be sent to this bot in resilience DynamoDb table
+func writeBotIdsAndMessage(botIdsArray []string, message string) {
+
+	client := initDBClient()
+
+	for _, id := range botIdsArray {
+
+		var item resilienceEntry
+		item.Id = id
+		item.Message = message
+
+		av, err := dynamodbattribute.MarshalMap(item)
+		input := &dynamodb.PutItemInput{
+			Item:      av,
+			TableName: aws.String("resilience"),
+		}
+		_, err = client.PutItem(input)
+		if err != nil {
+			fmt.Println(err.Error())
+		}
+	}
+}
+
 
 //returns the sensor list in db if any
 func GetDBSensors() ([]Sensor, error) {
@@ -104,6 +159,36 @@ func GetDBSensors() ([]Sensor, error) {
 	}
 	return sensorslist, nil
 }
+
+//removes the entry (botId,message) from resilience table if bot identified by botId received correctly message
+//and answered with an ack to te sending goroutine
+func removeResilienceEntry(botId string, message string) (){
+
+	client := initDBClient()
+
+	params := &dynamodb.DeleteItemInput{
+		Key: map[string]*dynamodb.AttributeValue{
+			"idBot": {
+				N: aws.String(botId),
+			},
+			"message": {
+				S: aws.String(message),
+			},
+		},
+		TableName: aws.String("resilience"),
+	}
+
+	_, err := client.DeleteItem(params)
+	if err != nil {
+		fmt.Println("Got error calling DeleteItem on bot : " + botId + " and with message : " + message + "\n" )
+		fmt.Println(err.Error())
+
+	}else{
+
+		fmt.Println("Deleted resielience entry : bot = " + botId + "  and message = " + message + "\n")
+	}
+}
+
 
 //func that checks if there are tables in dynamoDB
 func ExistingTables() (int , error){
@@ -143,7 +228,6 @@ func createTables() {
 
 	// Create table bots
 	tableNameBots := "bots"
-	tableNameSensors := "sensors"
 
 	inputBots := &dynamodb.CreateTableInput{
 		AttributeDefinitions: []*dynamodb.AttributeDefinition{
@@ -174,6 +258,10 @@ func createTables() {
 	}
 
 	fmt.Println("Created the table", tableNameBots)
+
+
+	// Create table sensors
+	tableNameSensors := "sensors"
 
 	inputSensors := &dynamodb.CreateTableInput{
 		AttributeDefinitions: []*dynamodb.AttributeDefinition{
@@ -206,5 +294,45 @@ func createTables() {
 	fmt.Println("Created the table", tableNameSensors)
 
 
+	// Create table resilience
+	tableNameResilience := "resilience"
+
+	inputResilience := &dynamodb.CreateTableInput{
+		AttributeDefinitions: []*dynamodb.AttributeDefinition{
+			{
+				AttributeName: aws.String("idBot"),
+				AttributeType: aws.String("S"),
+			},
+			{
+				AttributeName: aws.String("message"),
+				AttributeType: aws.String("S"),
+			},
+		},
+		KeySchema: []*dynamodb.KeySchemaElement{
+			{
+				AttributeName: aws.String("idBot"),
+				KeyType:       aws.String("HASH"),
+			},
+			{
+				AttributeName: aws.String("message"),
+				KeyType:       aws.String("RANGE"),
+			},
+		},
+		ProvisionedThroughput: &dynamodb.ProvisionedThroughput{
+			ReadCapacityUnits:  aws.Int64(10),
+			WriteCapacityUnits: aws.Int64(10),
+		},
+
+		TableName: aws.String(tableNameResilience),
+	}
+
+	_, err3 := client.CreateTable(inputResilience)
+	if err3 != nil {
+		fmt.Println("Got error calling CreateTable:")
+		fmt.Println(err3.Error())
+		os.Exit(1)
+	}
+
+	fmt.Println("Created the table", tableNameResilience)
 
 }
