@@ -19,7 +19,12 @@
     <select />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="00b7b6e3-061f-4dd2-bf05-dd30d0622b89" name="Default Changelist" comment="dockerized" />
+    <list default="true" id="00b7b6e3-061f-4dd2-bf05-dd30d0622b89" name="Default Changelist" comment="dockerized">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/chain.txt" beforeDir="false" afterPath="$PROJECT_DIR$/chain.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/http-api.go" beforeDir="false" afterPath="$PROJECT_DIR$/http-api.go" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/pubsub-system.go" beforeDir="false" afterPath="$PROJECT_DIR$/pubsub-system.go" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -132,9 +137,10 @@
       <screen x="0" y="0" width="1920" height="1040" />
     </state>
     <state x="504" y="88" key="CommitChangelistDialog2/0.0.1920.1040@0.0.1920.1040" timestamp="1600528250613" />
-    <state x="740" y="280" key="FileChooserDialogImpl" timestamp="1598213228266">
-      <screen x="0" y="0" width="1920" height="1050" />
+    <state x="740" y="277" key="FileChooserDialogImpl" timestamp="1600530287868">
+      <screen x="0" y="0" width="1920" height="1040" />
     </state>
+    <state x="740" y="277" key="FileChooserDialogImpl/0.0.1920.1040@0.0.1920.1040" timestamp="1600530287868" />
     <state x="740" y="280" key="FileChooserDialogImpl/0.0.1920.1050@0.0.1920.1050" timestamp="1598213228266" />
     <state x="827" y="423" key="Github.ShareDialog" timestamp="1598469987250">
       <screen x="0" y="0" width="1920" height="1050" />

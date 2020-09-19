@@ -75,6 +75,7 @@ func main() {
 
 	checkDynamoBotsCache()
 
+
 	fmt.Println("ECCHIME\n")
 	var endlessWait sync.WaitGroup
 	endlessWait.Add(1)
@@ -83,9 +84,9 @@ func main() {
 
 		for {
 
-			time.Sleep(5 * time.Second)
+			//time.Sleep(5 * time.Second)
 			if len(ch) > 0 {
-				fmt.Println(len(ch))
+				//fmt.Println(len(ch))
 
 				for i := range ch {
 
@@ -135,6 +136,8 @@ func main() {
 		}
 
 	}()
+
+
 
 	fmt.Println("Chissa che gli prende \n")
 	checkResilience()
@@ -243,7 +246,7 @@ func checkResilience() {
 	//for every bot there is a subroutine which sends the message to it and awaits for its ack
 	for _, resilienceItem := range res {
 
-		fmt.Println("IO QUI  CI ENTRO : \n")
+		//fmt.Println("IO QUI  CI ENTRO : \n")
 		ch := eb.botIdChannelMap[resilienceItem.Id]
 		wg.Add(1)
 
@@ -256,13 +259,14 @@ func checkResilience() {
 			ch <- data
 			//subroutine awaits for the ack from the bot
 
-		L:
+			L:
 			for {
 
 				select {
 
 				case response := <-myChan:
 					removeResilienceEntry(response, message)
+					fmt.Println("Ack received from bot !")
 					break L
 
 				case <-time.After(10 * time.Second):
@@ -275,7 +279,6 @@ func checkResilience() {
 
 			}
 
-			fmt.Println("Ack received from bot !")
 			wg.Done()
 
 		}(ch, resilienceItem.Message, &wg)
@@ -296,9 +299,11 @@ func checkDynamoSensorsCache() {
 	}
 	for _, i := range res {
 		sensors = append(sensors, i)
-		go func() {
-			publishTo(i)
-		}()
+		go func(sensor Sensor) {
+
+			publishTo(sensor)
+
+		}(i)
 	}
 }
 
@@ -348,9 +353,11 @@ func spawnSensorRand(w http.ResponseWriter, r *http.Request) {
 		newSensor.Type = topics[rand.Intn(len(topics))]
 		sensors = append(sensors, newSensor)
 		AddDBSensor(newSensor)
-		go func() {
-			publishTo(newSensor)
-		}()
+		go func(sensor Sensor) {
+
+			publishTo(sensor)
+
+		}(newSensor)
 	}
 
 	// make channel

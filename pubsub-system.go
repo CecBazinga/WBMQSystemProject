@@ -76,6 +76,7 @@ type Broker struct {
 	rm sync.RWMutex // mutex protect broker against concurrent access from read and write
 }
 
+
 // TODO Unsubscribe method!
 
 func (eb *Broker) Subscribe(bot Bot, ch DataChannel) {
@@ -144,6 +145,7 @@ func (eb *Broker) Publish(sensor Sensor, data interface{}) {
 			Sector: sensor.CurrentSector,
 		}
 		if chans, found := eb.subscribersCtx[internalKey]; found {
+			fmt.Println("Il lock funziona bene! \n")
 			// this is done because the slices refer to same array even though they are passed by value
 			// thus we are creating a new slice with our elements thus preserve locking correctly.
 			channels := append(DataChannelSlice{}, chans...)
@@ -163,7 +165,7 @@ func (eb *Broker) Publish(sensor Sensor, data interface{}) {
 					botIdsArray = append(StringSlice{}, botIds...)
 					writeBotIdsAndMessage(botIdsArray, message)
 
-					fmt.Println("RESILIENCE TABLE HAS BEEN FILLED ! \n")
+					fmt.Println("RESILIENCE TABLE HAS BEEN FILLED FOR SENSOR : ! " + sensor.Id + "\n")
 					time.Sleep(10 * time.Second)
 
 				} else {
@@ -184,14 +186,16 @@ func (eb *Broker) Publish(sensor Sensor, data interface{}) {
 
 						ch <- data
 						//subroutine awaits for the ack from the bot
-					L:
+
+						L:
 						for {
 
 							select {
 
 							case response := <-myChan:
-								fmt.Println("BOT ID IS : " + response + "\n")
+								//fmt.Println("BOT ID IS : " + response + "\n")
 								removeResilienceEntry(response, message)
+								fmt.Println("Ack received from bot : !" + response)
 								break L
 
 							case <-time.After(5 * time.Second):
@@ -204,7 +208,6 @@ func (eb *Broker) Publish(sensor Sensor, data interface{}) {
 
 						}
 
-						fmt.Println("Ack received from bot !")
 						wg.Done()
 
 					}(ch, message, DataEvent{Data: data, Topic: sensor.Type}, &wg)
@@ -261,7 +264,8 @@ func (eb *Broker) Publish(sensor Sensor, data interface{}) {
 
 						ch <- data
 						//subroutine awaits for the ack from the bot
-					L:
+
+						L:
 						for {
 
 							select {
@@ -326,11 +330,12 @@ func swapStandardToNormal() {
 
 //function that allow sensor to publish data in an infinite loop
 func publishTo(sensor Sensor) {
-	for {
 
+	for {
 		eb.Publish(sensor, strconv.FormatFloat(rand.Float64(), 'E', 1, 64))
-		//time.Sleep(time.Duration(rand.Intn(1000)) * time.Millisecond)
-		time.Sleep(20 * time.Second)
+		time.Sleep(time.Duration(rand.Intn(50)) * time.Second)
+
+
 	}
 }
 
