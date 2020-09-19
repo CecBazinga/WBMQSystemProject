@@ -65,15 +65,15 @@ type StringSlice []string
 
 // Broker stores the information about subscribers interested for // a particular topic
 type Broker struct {
-	subscribersCtx    map[key]DataChannelSlice
-	subscribers       map[string]DataChannelSlice
+	subscribersCtx map[key]DataChannelSlice
+	subscribers    map[string]DataChannelSlice
 
-	botIdChannelMap   map[string]DataChannel
-	botTopicCtxIdMap  map[key]StringSlice
-	botTopicIdMap     map[string]StringSlice
-	botChannelIdMap   map[chan DataEvent]string
+	botIdChannelMap  map[string]DataChannel
+	botTopicCtxIdMap map[key]StringSlice
+	botTopicIdMap    map[string]StringSlice
+	botChannelIdMap  map[chan DataEvent]string
 
-	rm             sync.RWMutex // mutex protect broker against concurrent access from read and write
+	rm sync.RWMutex // mutex protect broker against concurrent access from read and write
 }
 
 // TODO Unsubscribe method!
@@ -121,10 +121,8 @@ func (eb *Broker) Subscribe(bot Bot, ch DataChannel) {
 	//create mapping botId -> botChannel
 	eb.botIdChannelMap[bot.Id] = ch
 
-
 	//create mapping botChannel -> botId
 	eb.botChannelIdMap[ch] = bot.Id
-
 
 	eb.rm.Unlock()
 }
@@ -138,6 +136,7 @@ func (eb *Broker) Publish(sensor Sensor, data interface{}) {
 	eb.rm.RLock()
 
 	message := data.(string)
+	fmt.Println("MESSAGE IS : " + message + "\n")
 
 	if contextLock == true {
 		var internalKey = key{
@@ -149,9 +148,12 @@ func (eb *Broker) Publish(sensor Sensor, data interface{}) {
 			// thus we are creating a new slice with our elements thus preserve locking correctly.
 			channels := append(DataChannelSlice{}, chans...)
 
+			var wgMainSubroutine sync.WaitGroup
 			//main subroutine which spaws a subroutine for every bot who needs to be notificated and awaits
 			//for every subroutine to receive its pwn ack
 			go func(data DataEvent, dataChannelSlices DataChannelSlice, message string) {
+
+				wgMainSubroutine.Add(1)
 
 				var wg sync.WaitGroup
 				var botIdsArray []string
@@ -159,11 +161,15 @@ func (eb *Broker) Publish(sensor Sensor, data interface{}) {
 				if botIds, found := eb.botTopicCtxIdMap[internalKey]; found {
 
 					botIdsArray = append(StringSlice{}, botIds...)
-					writeBotIdsAndMessage(botIdsArray, message )
+					writeBotIdsAndMessage(botIdsArray, message)
 
-				}else{
+					fmt.Println("RESILIENCE TABLE HAS BEEN FILLED ! \n")
+					time.Sleep(10 * time.Second)
+
+				} else {
+					//TODO forwardare al frontend
 					fmt.Printf("No bots are subscribed to this sensor type : %v with ctx : %v \n",
-						sensor.Type, sensor.CurrentSector )
+						sensor.Type, sensor.CurrentSector)
 				}
 
 				//for every bot there is a subroutine which sends the message to it and awaits for its ack
@@ -171,23 +177,25 @@ func (eb *Broker) Publish(sensor Sensor, data interface{}) {
 
 					wg.Add(1)
 
-					go func(ch chan DataEvent , message string, data DataEvent, wg *sync.WaitGroup) {
+					go func(ch chan DataEvent, message string, data DataEvent, wg *sync.WaitGroup) {
 
 						myChan := make(chan string)
 						data.ResponseChannel = myChan
 
 						ch <- data
 						//subroutine awaits for the ack from the bot
+					L:
 						for {
 
 							select {
 
 							case response := <-myChan:
+								fmt.Println("BOT ID IS : " + response + "\n")
 								removeResilienceEntry(response, message)
-								break
+								break L
 
 							case <-time.After(5 * time.Second):
-								//TODO lasciare aperto o chiudere il canale e crearne uno nuovo? Ho optato per la seconda per evitare sprechi memoria 2
+
 								close(myChan)
 								myChan := make(chan string)
 								data.ResponseChannel = myChan
@@ -196,8 +204,8 @@ func (eb *Broker) Publish(sensor Sensor, data interface{}) {
 
 						}
 
-						fmt.Println("Ack received from bot !" )
-						defer wg.Done()
+						fmt.Println("Ack received from bot !")
+						wg.Done()
 
 					}(ch, message, DataEvent{Data: data, Topic: sensor.Type}, &wg)
 
@@ -207,8 +215,11 @@ func (eb *Broker) Publish(sensor Sensor, data interface{}) {
 				//wait all subroutines have received their acks
 				wg.Wait()
 
+				wgMainSubroutine.Done()
+
 			}(DataEvent{Data: data, Topic: sensor.Type}, channels, message)
 
+			wgMainSubroutine.Wait()
 		}
 
 	} else {
@@ -217,9 +228,14 @@ func (eb *Broker) Publish(sensor Sensor, data interface{}) {
 			// this is done because the slices refer to same array even though they are passed by value
 			// thus we are creating a new slice with our elements thus preserve locking correctly.
 			channels := append(DataChannelSlice{}, chans...)
+
+			var wgMainSubroutine sync.WaitGroup
+
 			//main subroutine which spaws a subroutine for every bot who needs to be notificated and awaits
 			//for every subroutine to receive its pwn ack
 			go func(data DataEvent, dataChannelSlices DataChannelSlice, message string) {
+
+				wgMainSubroutine.Add(1)
 
 				var wg sync.WaitGroup
 				var botIdsArray []string
@@ -227,10 +243,10 @@ func (eb *Broker) Publish(sensor Sensor, data interface{}) {
 				if botIds, found := eb.botTopicIdMap[sensor.Type]; found {
 
 					botIdsArray = append(StringSlice{}, botIds...)
-					writeBotIdsAndMessage(botIdsArray, message )
+					writeBotIdsAndMessage(botIdsArray, message)
 
-				}else{
-					fmt.Println("No bots are subscribed to this sensor type : " + sensor.Type + "\n" )
+				} else {
+					fmt.Println("No bots are subscribed to this sensor type : " + sensor.Type + "\n")
 				}
 
 				//for every bot there is a subroutine which sends the message to it and awaits for its ack
@@ -238,23 +254,24 @@ func (eb *Broker) Publish(sensor Sensor, data interface{}) {
 
 					wg.Add(1)
 
-					go func(ch chan DataEvent , message string, data DataEvent, wg *sync.WaitGroup) {
+					go func(ch chan DataEvent, message string, data DataEvent, wg *sync.WaitGroup) {
 
 						myChan := make(chan string)
 						data.ResponseChannel = myChan
 
 						ch <- data
 						//subroutine awaits for the ack from the bot
+					L:
 						for {
 
 							select {
 
 							case response := <-myChan:
 								removeResilienceEntry(response, message)
-								break
+								break L
 
-							case <-time.After(5 * time.Second):
-								//TODO lasciare aperto o chiudere il canale e crearne uno nuovo? Ho optato per la seconda per evitare sprechi memoria 2
+							case <-time.After(10 * time.Second):
+
 								close(myChan)
 								myChan := make(chan string)
 								data.ResponseChannel = myChan
@@ -263,8 +280,9 @@ func (eb *Broker) Publish(sensor Sensor, data interface{}) {
 
 						}
 
-						fmt.Println("Ack received from bot !" )
-						defer wg.Done()
+						fmt.Println("Ack received from bot !")
+
+						wg.Done()
 
 					}(ch, message, DataEvent{Data: data, Topic: sensor.Type}, &wg)
 
@@ -274,7 +292,12 @@ func (eb *Broker) Publish(sensor Sensor, data interface{}) {
 				//wait all subroutines have received their acks
 				wg.Wait()
 
+				wgMainSubroutine.Done()
+
 			}(DataEvent{Data: data, Topic: sensor.Type}, channels, message)
+
+			wgMainSubroutine.Wait()
+
 		}
 	}
 	eb.rm.RUnlock()
@@ -282,12 +305,12 @@ func (eb *Broker) Publish(sensor Sensor, data interface{}) {
 
 // init broker
 var eb = &Broker{
-	subscribers:    map[string]DataChannelSlice{},
-	subscribersCtx: map[key]DataChannelSlice{},
-	botIdChannelMap:   map[string]DataChannel{},
-	botTopicCtxIdMap:  map[key]StringSlice{},
-	botTopicIdMap:     map[string]StringSlice{},
-	botChannelIdMap:   map[chan DataEvent]string{},
+	subscribers:      map[string]DataChannelSlice{},
+	subscribersCtx:   map[key]DataChannelSlice{},
+	botIdChannelMap:  map[string]DataChannel{},
+	botTopicCtxIdMap: map[key]StringSlice{},
+	botTopicIdMap:    map[string]StringSlice{},
+	botChannelIdMap:  map[chan DataEvent]string{},
 }
 
 /*  MAYBE FUTURE IMPLEMENTATION?
@@ -306,7 +329,8 @@ func publishTo(sensor Sensor) {
 	for {
 
 		eb.Publish(sensor, strconv.FormatFloat(rand.Float64(), 'E', 1, 64))
-		time.Sleep(time.Duration(rand.Intn(1000)) * time.Millisecond)
+		//time.Sleep(time.Duration(rand.Intn(1000)) * time.Millisecond)
+		time.Sleep(20 * time.Second)
 	}
 }
 

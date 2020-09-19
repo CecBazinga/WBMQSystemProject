@@ -45,8 +45,8 @@ type Sensor struct {
 
 //resilience entry
 type resilienceEntry struct {
-	Id            string `json:"id"`
-	Message       string `json:"message"`
+	Id      string `json:"id"`
+	Message string `json:"message"`
 }
 
 var bots []Bot
@@ -63,23 +63,86 @@ func main() {
 	router := mux.NewRouter()
 
 	checkCli()
-	tablesNumber,err := ExistingTables()
+	tablesNumber, err := ExistingTables()
 	if err != nil {
 		panic(err)
 	}
 	if tablesNumber == 0 {
 		//create new tables
 		createTables()
-		time.Sleep(10*time.Second)
+		time.Sleep(10 * time.Second)
 	}
 
 	checkDynamoBotsCache()
+
+	fmt.Println("ECCHIME\n")
+	var endlessWait sync.WaitGroup
+	endlessWait.Add(1)
+
+	go func() {
+
+		for {
+
+			time.Sleep(5 * time.Second)
+			if len(ch) > 0 {
+				fmt.Println(len(ch))
+
+				for i := range ch {
+
+					c := ch[i]
+
+					if spawned[i] {
+
+						fmt.Println(spawned[i])
+
+						go func(c chan DataEvent, i int) {
+
+							fmt.Println("Spawned routine for bot : " + bots[i].Id + "\n")
+							spawned[i] = false
+							fmt.Println(spawned[i])
+
+							for {
+								select {
+								case d := <-c:
+
+									//get the botId associated with this channel
+									if botId, found := eb.botChannelIdMap[c]; found {
+										// si puo simulare il crash dell'invio di un ack con un if qui prima di ch <- botId
+										d.ResponseChannel <- botId
+									}
+
+									//TODO lock su results ? 3 commentata per evitare problemi se non sincronizzata
+									/*
+										results = append(results, Result{
+											Id:     IDMapToChannel[i],
+											Data:   d.Data,
+											Topic:  d.Topic,
+											Sector: SectorMapping[i],
+										})
+										//go printDataEvent(IDMapToChannel[i], d)
+									*/
+								default:
+									continue
+								}
+
+							}
+
+						}(c, i)
+					}
+				}
+
+			}
+		}
+
+	}()
+
+	fmt.Println("Chissa che gli prende \n")
+	checkResilience()
+
 	checkDynamoSensorsCache()
 
 	initWarehouseSpaces()
 	initTopics()
-
-
 
 	router.HandleFunc("/results", getResults).Methods("GET")
 
@@ -101,54 +164,8 @@ func main() {
 		log.Fatal(http.ListenAndServe(":5000", router))
 	}()
 
+	endlessWait.Wait()
 
-	checkResilience()
-
-	for {
-
-		if len(ch) > 0 {
-
-			for i := range ch {
-
-				c := ch[i]
-
-				if spawned[i] {
-
-					go func(c chan DataEvent) {
-
-						spawned[i] = false
-
-						for {
-							select {
-							case d := <-c:
-
-								//get the botId associated with this channel
-								if botId, found := eb.botChannelIdMap[c]; found {
-									// si puo simulare il crash dell'invio di un ack con un if qui prima di ch <- botId
-									d.ResponseChannel <- botId
-								}
-
-								//TODO lock su results ? 3 commentata per evitare problemi se non sincronizzata
-								/*
-									results = append(results, Result{
-										Id:     IDMapToChannel[i],
-										Data:   d.Data,
-										Topic:  d.Topic,
-										Sector: SectorMapping[i],
-									})
-									//go printDataEvent(IDMapToChannel[i], d)
-								*/
-							default:
-								continue
-							}
-
-						}
-
-					}(c)
-				}
-			}
-		}
-	}
 }
 
 // STATIC OBJECT IN THE SYSTEM
@@ -176,7 +193,6 @@ func initWarehouseSpaces() {
 		"c4")
 }
 
-
 //check for first element inserted by command-line to create a context/non context aware environment
 func checkCli() {
 	if len(os.Args) > 1 {
@@ -198,7 +214,6 @@ func switchContext(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-
 // function to ping the application
 func heartBeatMonitoring(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
@@ -213,41 +228,45 @@ func heartBeatMonitoring(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-
-
-
-func checkResilience(){
+func checkResilience() {
 
 	res, err := GetResilienceEntries()
 	if err != nil {
 		panic(err)
 	}
 
+	fmt.Println("RESILIENCE CHECK SIZE IS : \n")
+	fmt.Println(len(res))
+
 	var wg sync.WaitGroup
 
 	//for every bot there is a subroutine which sends the message to it and awaits for its ack
 	for _, resilienceItem := range res {
 
+		fmt.Println("IO QUI  CI ENTRO : \n")
 		ch := eb.botIdChannelMap[resilienceItem.Id]
 		wg.Add(1)
 
-		go func(ch chan DataEvent , message string, wg *sync.WaitGroup) {
+		go func(ch chan DataEvent, message string, wg *sync.WaitGroup) {
 
+			fmt.Println("IO QUI CI ENTRO 2 : \n")
 			myChan := make(chan string)
 			var data = DataEvent{Data: resilienceItem.Message, ResponseChannel: myChan}
 
 			ch <- data
 			//subroutine awaits for the ack from the bot
+
+		L:
 			for {
 
 				select {
 
 				case response := <-myChan:
 					removeResilienceEntry(response, message)
-					break
+					break L
 
-				case <-time.After(5 * time.Second):
-					//TODO lasciare aperto o chiudere il canale e crearne uno nuovo? Ho optato per la seconda per evitare sprechi memoria 2
+				case <-time.After(10 * time.Second):
+
 					close(myChan)
 					myChan := make(chan string)
 					data.ResponseChannel = myChan
@@ -256,8 +275,8 @@ func checkResilience(){
 
 			}
 
-			fmt.Println("Ack received from bot !" )
-			defer wg.Done()
+			fmt.Println("Ack received from bot !")
+			wg.Done()
 
 		}(ch, resilienceItem.Message, &wg)
 
@@ -265,10 +284,9 @@ func checkResilience(){
 
 	//wait all subroutines have received their acks
 	wg.Wait()
-
+	fmt.Println("QUI CI ARRIVO E TERMINO !\n")
 
 }
-
 
 // retrieve sensor state from DB and initializes any sensor to spawn data (if any sensor is found)
 func checkDynamoSensorsCache() {
@@ -296,8 +314,8 @@ func checkDynamoBotsCache() {
 	}
 	for _, i := range res {
 		bots = append(bots, i)
-		spawned = append(spawned,true)
-		chn := make(chan DataEvent,len(sensors))
+		spawned = append(spawned, true)
+		chn := make(chan DataEvent, len(sensors))
 		ch = append(ch, chn)
 		eb.Subscribe(i, chn)
 	}
@@ -311,7 +329,6 @@ func getResults(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resultsTrunc)
 	results = results[50:] // [50, 51, 52, 53 ... ]
 }
-
 
 //spawna un sensore randomico o un numero randomico di sensori?
 func spawnSensorRand(w http.ResponseWriter, r *http.Request) {
@@ -360,7 +377,6 @@ func spawnSensor(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(newSensor)
 }
 
-
 func spawnBotRand(w http.ResponseWriter, r *http.Request) {
 	var num = mux.Vars(r)["num"]
 	totnum, err := strconv.Atoi(num)
@@ -377,9 +393,9 @@ func spawnBotRand(w http.ResponseWriter, r *http.Request) {
 		newBot.CurrentSector = warehouses[rand.Intn(len(warehouses))]
 		newBot.Topic = topics[rand.Intn(len(topics))]
 		bots = append(bots, newBot)
-		spawned = append(spawned,true)
+		spawned = append(spawned, true)
 		AddDBBot(newBot)
-		chn := make(chan DataEvent,len(sensors))
+		chn := make(chan DataEvent, len(sensors))
 		ch = append(ch, chn)
 		eb.Subscribe(newBot, chn)
 	}
@@ -397,11 +413,11 @@ func spawnBot(w http.ResponseWriter, r *http.Request) {
 	json.NewDecoder(r.Body).Decode(&newBot)
 	newBot.Id = shortuuid.New()
 	bots = append(bots, newBot)
-	spawned = append(spawned,true)
+	spawned = append(spawned, true)
 
 	// make channel
 	AddDBBot(newBot)
-	chn := make(chan DataEvent,len(sensors))
+	chn := make(chan DataEvent, len(sensors))
 	ch = append(ch, chn)
 	eb.Subscribe(newBot, chn)
 

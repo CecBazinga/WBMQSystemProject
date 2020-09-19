@@ -10,10 +10,9 @@ import (
 	"os"
 )
 
-
 func initDBClient() *dynamodb.DynamoDB {
 
-	if dynamoDBSession == nil{
+	if dynamoDBSession == nil {
 
 		sess := session.Must(session.NewSessionWithOptions(session.Options{
 			SharedConfigState: session.SharedConfigEnable,
@@ -46,7 +45,7 @@ func GetDBBots() ([]Bot, error) {
 		TableName: aws.String("bots"),
 	}
 
-	fmt.Println("Params are" , params)
+	fmt.Println("Params are", params)
 	result, err := client.Scan(params)
 	if err != nil {
 		fmt.Println("Step 1")
@@ -68,15 +67,14 @@ func GetDBBots() ([]Bot, error) {
 	return botslist, nil
 }
 
-
 // return the list of botIds and their own messages which need to be retransmitted
-func  GetResilienceEntries() ([]resilienceEntry, error) {
+func GetResilienceEntries() ([]resilienceEntry, error) {
 	client := initDBClient()
 	params := &dynamodb.ScanInput{
 		TableName: aws.String("resilience"),
 	}
 
-	fmt.Println("Params are" , params)
+	fmt.Println("Params are", params)
 	result, err := client.Scan(params)
 	if err != nil {
 		fmt.Println("Step A")
@@ -112,14 +110,19 @@ func AddDBSensor(sensor Sensor) {
 	}
 }
 
-
 //add every bot id and the message to be sent to this bot in resilience DynamoDb table
 func writeBotIdsAndMessage(botIdsArray []string, message string) {
 
 	client := initDBClient()
 
+	fmt.Println("BOT IDS ARRAY SIZE IS : \n")
+	fmt.Println(len(botIdsArray))
+	fmt.Println("MESSAGE IS : \n")
+	fmt.Println(message)
+
 	for _, id := range botIdsArray {
 
+		fmt.Println("Id number : " + id)
 		var item resilienceEntry
 		item.Id = id
 		item.Message = message
@@ -131,11 +134,11 @@ func writeBotIdsAndMessage(botIdsArray []string, message string) {
 		}
 		_, err = client.PutItem(input)
 		if err != nil {
+			fmt.Println("THERE WE GO !!!")
 			fmt.Println(err.Error())
 		}
 	}
 }
-
 
 //returns the sensor list in db if any
 func GetDBSensors() ([]Sensor, error) {
@@ -162,17 +165,19 @@ func GetDBSensors() ([]Sensor, error) {
 
 //removes the entry (botId,message) from resilience table if bot identified by botId received correctly message
 //and answered with an ack to te sending goroutine
-func removeResilienceEntry(botId string, message string) (){
+func removeResilienceEntry(botId string, message string) {
 
 	client := initDBClient()
+	id := botId
+	thisMessage := message
 
 	params := &dynamodb.DeleteItemInput{
 		Key: map[string]*dynamodb.AttributeValue{
-			"idBot": {
-				N: aws.String(botId),
+			"id": {
+				S: aws.String(id),
 			},
 			"message": {
-				S: aws.String(message),
+				S: aws.String(thisMessage),
 			},
 		},
 		TableName: aws.String("resilience"),
@@ -180,18 +185,17 @@ func removeResilienceEntry(botId string, message string) (){
 
 	_, err := client.DeleteItem(params)
 	if err != nil {
-		fmt.Println("Got error calling DeleteItem on bot : " + botId + " and with message : " + message + "\n" )
+		fmt.Println("Got error calling DeleteItem on bot : " + botId + " and with message : " + message + "\n")
 		fmt.Println(err.Error())
 
-	}else{
+	} else {
 
 		fmt.Println("Deleted resielience entry : bot = " + botId + "  and message = " + message + "\n")
 	}
 }
 
-
 //func that checks if there are tables in dynamoDB
-func ExistingTables() (int , error){
+func ExistingTables() (int, error) {
 
 	// create the input configuration instance
 	input := &dynamodb.ListTablesInput{}
@@ -213,13 +217,12 @@ func ExistingTables() (int , error){
 			// Message from an error.
 			fmt.Println(err.Error())
 		}
-		return -1,err
+		return -1, err
 	}
 
-	return len(result.TableNames),nil
+	return len(result.TableNames), nil
 
 }
-
 
 //creates new Bots and Sensors tables
 func createTables() {
@@ -259,7 +262,6 @@ func createTables() {
 
 	fmt.Println("Created the table", tableNameBots)
 
-
 	// Create table sensors
 	tableNameSensors := "sensors"
 
@@ -293,14 +295,13 @@ func createTables() {
 
 	fmt.Println("Created the table", tableNameSensors)
 
-
 	// Create table resilience
 	tableNameResilience := "resilience"
 
 	inputResilience := &dynamodb.CreateTableInput{
 		AttributeDefinitions: []*dynamodb.AttributeDefinition{
 			{
-				AttributeName: aws.String("idBot"),
+				AttributeName: aws.String("id"),
 				AttributeType: aws.String("S"),
 			},
 			{
@@ -310,7 +311,7 @@ func createTables() {
 		},
 		KeySchema: []*dynamodb.KeySchemaElement{
 			{
-				AttributeName: aws.String("idBot"),
+				AttributeName: aws.String("id"),
 				KeyType:       aws.String("HASH"),
 			},
 			{
