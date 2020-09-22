@@ -1,0 +1,22 @@
+TODO:
+
+-Test
+-Relazione
+
+
+Cecilia/Rob:
+
+-Controlli degli input da frontend
+-Integrazione funzioni di Cecilia col codice
+-Kill ---> Broken robot/sensor (flag rotto funzionanente nelle struct)
+
+Ale:
+
+-Comunicazione publisher/broker come quella tra broker/bot ( un canale bufferizzato al broker e singoli canali di ack per i publissher)
+-Semantiche messaggi :
+	- Rivedere bene at least once con storico messaggi per i bot
+	- Eventualmente timeout based
+	- Molto molto eventualmente (cioè se proprio volessi fa qualcosa pe rvinamme la vita) exactly once
+
+
+

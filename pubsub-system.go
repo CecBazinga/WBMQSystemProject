@@ -134,7 +134,7 @@ func (eb *Broker) Publish(sensor Sensor, data interface{}) {
 	//TODO alla creazione delle subroutine cosi locka gli array in uso e quando non servono piu lo slockiamo : unlock-->wait main subroutine e dopo l'unlock può
 	//TODO servire altri sensori 1
 
-	eb.rm.RLock()
+	//eb.rm.RLock()
 
 	message := data.(string)
 	fmt.Println("MESSAGE IS : " + message + "\n")
@@ -192,7 +192,7 @@ func (eb *Broker) Publish(sensor Sensor, data interface{}) {
 
 							select {
 
-							case response := <-myChan:
+							case response := <- myChan:
 								//fmt.Println("BOT ID IS : " + response + "\n")
 								removeResilienceEntry(response, message)
 								fmt.Println("Ack received from bot : !" + response)
@@ -304,7 +304,7 @@ func (eb *Broker) Publish(sensor Sensor, data interface{}) {
 
 		}
 	}
-	eb.rm.RUnlock()
+	//eb.rm.RUnlock()
 }
 
 // init broker

@@ -21,8 +21,6 @@
   <component name="ChangeListManager">
     <list default="true" id="00b7b6e3-061f-4dd2-bf05-dd30d0622b89" name="Default Changelist" comment="dockerized">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/chain.txt" beforeDir="false" afterPath="$PROJECT_DIR$/chain.txt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/http-api.go" beforeDir="false" afterPath="$PROJECT_DIR$/http-api.go" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/pubsub-system.go" beforeDir="false" afterPath="$PROJECT_DIR$/pubsub-system.go" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
