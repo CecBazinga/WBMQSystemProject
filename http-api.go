@@ -75,7 +75,6 @@ func main() {
 
 	checkDynamoBotsCache()
 
-
 	fmt.Println("ECCHIME\n")
 	var endlessWait sync.WaitGroup
 	endlessWait.Add(1)
@@ -137,8 +136,6 @@ func main() {
 
 	}()
 
-
-
 	fmt.Println("Chissa che gli prende \n")
 	checkResilience()
 
@@ -153,11 +150,17 @@ func main() {
 	router.HandleFunc("/switch", switchContext).Methods("POST")
 
 	// TODO KILL BOT ROUTE
+	router.HandleFunc("/unsubscribeBot", unsubscribeBot).Methods("POST")
+	router.HandleFunc("/unsubscribeRandomBot/{num}", unsubRandomBot).Methods("POST")
+	router.HandleFunc("/killSingleBot", killBot).Methods("POST")
+	router.HandleFunc("/killRandomBot/{num}", killRandomBot).Methods("POST")
 	router.HandleFunc("/bot", spawnBot).Methods("POST")
 	router.HandleFunc("/bot/{num}", spawnBotRand).Methods("POST")
 	router.HandleFunc("/bot", listAllBots).Methods("GET")
 
 	// TODO KILL BOT SENSOR
+	router.HandleFunc("/killRandomSensor/{num}", killRandomSensor).Methods("POST")
+	router.HandleFunc("/killSingleSensor", killSensor).Methods("POST")
 	router.HandleFunc("/sensor", spawnSensor).Methods("POST")
 	router.HandleFunc("/sensor/{num}", spawnSensorRand).Methods("POST")
 	router.HandleFunc("/sensor", listAllSensors).Methods("GET")
@@ -168,6 +171,27 @@ func main() {
 	}()
 
 	endlessWait.Wait()
+
+}
+
+func killBot(w http.ResponseWriter, r *http.Request) {
+
+	var id string
+
+	var check bool
+
+	json.NewDecoder(r.Body).Decode(&id)
+	fmt.Println("id bot: ", id)
+
+	//var err bool
+	check, _ = removeBot(id)
+
+	if check == false {
+		fmt.Println("--- Error: bot was not killed")
+	} else {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(id)
+	}
 
 }
 
@@ -259,7 +283,7 @@ func checkResilience() {
 			ch <- data
 			//subroutine awaits for the ack from the bot
 
-			L:
+		L:
 			for {
 
 				select {
@@ -430,6 +454,179 @@ func spawnBot(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(newBot)
+}
+
+//unsubscribes bot with a given Id from current topic
+func unsubscribeBot(w http.ResponseWriter, r *http.Request) {
+
+	var id string
+	var check bool
+
+	json.NewDecoder(r.Body).Decode(&id)
+	fmt.Println("id unsub: ", id)
+
+	var newBot Bot
+	newBot, _ = GetDBBot(id)
+	if newBot.Id != id {
+		fmt.Println("--- Error: wrong bot")
+	}
+
+	check, _ = removeTopic(id)
+	if check == false {
+		fmt.Println("--- Error: topic was not removed")
+	} else {
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(newBot)
+
+	}
+
+	//fmt.Printf("----len", len(eb.subscribersCtx))
+	/*
+		for i := 0; i < len(eb.subscribers); i++ {
+			//fmt.Printf("value of a: %d\n", a)
+			subscribers := eb.subscribers
+			print(&subscribers)
+		}
+
+		print(eb.subscribersCtx)
+
+	*/
+
+}
+
+func unsubRandomBot(w http.ResponseWriter, r *http.Request) {
+
+	fmt.Println("--- STO IN UNSUB RANDOM BOTS!!")
+
+	var num = mux.Vars(r)["num"]
+	totnum, err := strconv.Atoi(num)
+	//json.NewDecoder(r.Body).Decode(&newBot)
+
+	fmt.Println("--- totnum: ", totnum)
+
+	if err != nil {
+		// there was an error
+		w.WriteHeader(400)
+		w.Write([]byte("ID could not be converted to integer"))
+		return
+	}
+
+	for i := 0; i < totnum; i++ {
+
+		randomIndex := rand.Intn(len(sensors))
+		pickedBot := bots[randomIndex]
+
+		fmt.Println("--- pickedSensor id: ", pickedBot.Id)
+
+		var check bool
+		check, _ = removeTopic(pickedBot.Id)
+		if check == false {
+			fmt.Println("--- Error: not all bot were not unsubscribed")
+		} else {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(pickedBot.Id)
+		}
+
+	}
+
+}
+
+func killRandomBot(w http.ResponseWriter, r *http.Request) {
+
+	fmt.Println("--- STO IN KILL RANDOM BOTS!!")
+
+	var num = mux.Vars(r)["num"]
+	totnum, err := strconv.Atoi(num)
+	//json.NewDecoder(r.Body).Decode(&newBot)
+
+	fmt.Println("--- totnum: ", totnum)
+
+	if err != nil {
+		// there was an error
+		w.WriteHeader(400)
+		w.Write([]byte("ID could not be converted to integer"))
+		return
+	}
+
+	for i := 0; i < totnum; i++ {
+
+		randomIndex := rand.Intn(len(sensors))
+		pickedSensor := sensors[randomIndex]
+
+		fmt.Println("--- pickedBot id: ", pickedSensor.Id)
+
+		var check bool
+		check, _ = removeBot(pickedSensor.Id)
+		if check == false {
+			fmt.Println("--- Error: bot was not killed")
+		} else {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(pickedSensor.Id)
+		}
+
+	}
+
+}
+
+func killRandomSensor(w http.ResponseWriter, r *http.Request) {
+
+	fmt.Println("--- STO IN KILL RANDOM SENSOR!!")
+
+	var num = mux.Vars(r)["num"]
+	totnum, err := strconv.Atoi(num)
+	//json.NewDecoder(r.Body).Decode(&newBot)
+
+	fmt.Println("--- totnum: ", totnum)
+
+	if err != nil {
+		// there was an error
+		w.WriteHeader(400)
+		w.Write([]byte("ID could not be converted to integer"))
+		return
+	}
+
+	for i := 0; i < totnum; i++ {
+
+		randomIndex := rand.Intn(len(sensors))
+		pickedSensor := sensors[randomIndex]
+
+		fmt.Println("--- pickedSensor id: ", pickedSensor.Id)
+
+		var check bool
+		check, _ = removeSensor(pickedSensor.Id)
+		if check == false {
+			fmt.Println("--- Error: sensor was not killed")
+		} else {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(pickedSensor.Id)
+		}
+
+	}
+
+}
+
+func killSensor(w http.ResponseWriter, r *http.Request) {
+
+	//var id = "gni5otQjDyhUWmvBE8EWS4"
+
+	fmt.Println("-- STO IN KILL SENSOR ")
+	var id string
+	var check bool
+
+	json.NewDecoder(r.Body).Decode(&id)
+	fmt.Println("id sensor: ", id)
+	//var err bool
+	check, _ = removeSensor(id)
+	if check == false {
+		fmt.Println("--- Error: sensor was not killed")
+	} else {
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(id)
+
+	}
+
 }
 
 //send bots list as response
