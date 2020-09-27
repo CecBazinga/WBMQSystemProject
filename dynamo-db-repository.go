@@ -103,7 +103,7 @@ func AddDBSensor(sensor Sensor) {
 	av, err := dynamodbattribute.MarshalMap(sensor)
 	input := &dynamodb.PutItemInput{
 		Item:      av,
-		TableName: aws.String("sensors"),
+		TableName: aws.String("sensorsRequest"),
 	}
 	_, err = client.PutItem(input)
 	if err != nil {
@@ -145,7 +145,7 @@ func writeBotIdsAndMessage(botIdsArray []string, message string) {
 func GetDBSensors() ([]Sensor, error) {
 	client := initDBClient()
 	params := &dynamodb.ScanInput{
-		TableName: aws.String("sensors"),
+		TableName: aws.String("sensorsRequest"),
 	}
 	result, err := client.Scan(params)
 	if err != nil {
@@ -296,7 +296,7 @@ func removeSensor(id string) (bool, error) {
 	//av, err := dynamodbattribute.MarshalMap(sensor)
 	input := &dynamodb.DeleteItemInput{
 		//Item:      av,
-		TableName: aws.String("sensors"),
+		TableName: aws.String("sensorsRequest"),
 		Key: map[string]*dynamodb.AttributeValue{
 			"id": {
 				S: &id,
@@ -380,8 +380,8 @@ func createTables() {
 
 	fmt.Println("Created the table", tableNameBots)
 
-	// Create table sensors
-	tableNameSensors := "sensors"
+	// Create table sensorsRequest
+	tableNameSensors := "sensorsRequest"
 
 	inputSensors := &dynamodb.CreateTableInput{
 		AttributeDefinitions: []*dynamodb.AttributeDefinition{

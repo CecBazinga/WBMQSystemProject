@@ -10,7 +10,6 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
-	"strconv"
 	"sync"
 	"time"
 )
@@ -41,6 +40,8 @@ type Sensor struct {
 	Id            string `json:"id"`
 	CurrentSector string `json:"current_sector"`
 	Type          string `json:"type"`
+	Message       string `json:"msg"`
+	Pbrtx         bool   `json:"pbrtx"`
 }
 
 //resilience entry
@@ -50,7 +51,7 @@ type resilienceEntry struct {
 }
 
 var bots []Bot
-var sensors []Sensor
+var sensorsRequest []Sensor
 var spawned []bool
 var warehouses []string
 var topics []string
@@ -75,71 +76,71 @@ func main() {
 
 	checkDynamoBotsCache()
 
-	fmt.Println("ECCHIME\n")
-	var endlessWait sync.WaitGroup
-	endlessWait.Add(1)
+	/*
+		fmt.Println("ECCHIME\n")
+		var endlessWait sync.WaitGroup
+		endlessWait.Add(1)
+		go func() {
 
-	go func() {
+			for {
 
-		for {
+				//time.Sleep(5 * time.Second)
+				if len(ch) > 0 {
+					//fmt.Println(len(ch))
 
-			//time.Sleep(5 * time.Second)
-			if len(ch) > 0 {
-				//fmt.Println(len(ch))
+					for i := range ch {
 
-				for i := range ch {
+						c := ch[i]
 
-					c := ch[i]
+						if spawned[i] {
 
-					if spawned[i] {
-
-						fmt.Println(spawned[i])
-
-						go func(c chan DataEvent, i int) {
-
-							fmt.Println("Spawned routine for bot : " + bots[i].Id + "\n")
-							spawned[i] = false
 							fmt.Println(spawned[i])
 
-							for {
-								select {
-								case d := <-c:
+							go func(c chan DataEvent, i int) {
 
-									//get the botId associated with this channel
-									if botId, found := eb.botChannelIdMap[c]; found {
-										// si puo simulare il crash dell'invio di un ack con un if qui prima di ch <- botId
-										d.ResponseChannel <- botId
+								fmt.Println("Spawned routine for bot : " + bots[i].Id + "\n")
+								spawned[i] = false
+								fmt.Println(spawned[i])
+
+								for {
+									select {
+									case d := <-c:
+
+										//get the botId associated with this channel
+										if botId, found := eb.botChannelIdMap[c]; found {
+											// si puo simulare il crash dell'invio di un ack con un if qui prima di ch <- botId
+											d.ResponseChannel <- botId
+										}
+
+										//TODO lock su results ? 3 commentata per evitare problemi se non sincronizzata
+										/*
+											results = append(results, Result{
+												Id:     IDMapToChannel[i],
+												Data:   d.Data,
+												Topic:  d.Topic,
+												Sector: SectorMapping[i],
+											})
+											//go printDataEvent(IDMapToChannel[i], d)
+
+									default:
+										continue
 									}
 
-									//TODO lock su results ? 3 commentata per evitare problemi se non sincronizzata
-									/*
-										results = append(results, Result{
-											Id:     IDMapToChannel[i],
-											Data:   d.Data,
-											Topic:  d.Topic,
-											Sector: SectorMapping[i],
-										})
-										//go printDataEvent(IDMapToChannel[i], d)
-									*/
-								default:
-									continue
 								}
 
-							}
-
-						}(c, i)
+							}(c, i)
+						}
 					}
+
 				}
-
 			}
-		}
 
-	}()
+		}()*/
 
 	fmt.Println("Chissa che gli prende \n")
 	checkResilience()
 
-	checkDynamoSensorsCache()
+	//checkDynamoSensorsCache()
 
 	initWarehouseSpaces()
 	initTopics()
@@ -151,18 +152,18 @@ func main() {
 
 	// TODO KILL BOT ROUTE
 	router.HandleFunc("/unsubscribeBot", unsubscribeBot).Methods("POST")
-	router.HandleFunc("/unsubscribeRandomBot/{num}", unsubRandomBot).Methods("POST")
+	//router.HandleFunc("/unsubscribeRandomBot/{num}", unsubRandomBot).Methods("POST")
 	router.HandleFunc("/killSingleBot", killBot).Methods("POST")
-	router.HandleFunc("/killRandomBot/{num}", killRandomBot).Methods("POST")
+	//router.HandleFunc("/killRandomBot/{num}", killRandomBot).Methods("POST")
 	router.HandleFunc("/bot", spawnBot).Methods("POST")
-	router.HandleFunc("/bot/{num}", spawnBotRand).Methods("POST")
+	//router.HandleFunc("/bot/{num}", spawnBotRand).Methods("POST")
 	router.HandleFunc("/bot", listAllBots).Methods("GET")
 
 	// TODO KILL BOT SENSOR
-	router.HandleFunc("/killRandomSensor/{num}", killRandomSensor).Methods("POST")
+	//router.HandleFunc("/killRandomSensor/{num}", killRandomSensor).Methods("POST")
 	router.HandleFunc("/killSingleSensor", killSensor).Methods("POST")
 	router.HandleFunc("/sensor", spawnSensor).Methods("POST")
-	router.HandleFunc("/sensor/{num}", spawnSensorRand).Methods("POST")
+	//router.HandleFunc("/sensor/{num}", spawnSensorRand).Methods("POST")
 	router.HandleFunc("/sensor", listAllSensors).Methods("GET")
 
 	// linea standard per mettere in ascolto l'app. TODO controllo d'errore
@@ -170,8 +171,12 @@ func main() {
 		log.Fatal(http.ListenAndServe(":5000", router))
 	}()
 
-	endlessWait.Wait()
+	//cicla sulla lista di richieste di tipo sensorRequests
+	for {
+		//servi sensor request[0]
 
+	}
+	//endlessWait.Wait()
 }
 
 func killBot(w http.ResponseWriter, r *http.Request) {
@@ -322,11 +327,10 @@ func checkDynamoSensorsCache() {
 		panic(err)
 	}
 	for _, i := range res {
-		sensors = append(sensors, i)
+		sensorsRequest = append(sensorsRequest, i)
 		go func(sensor Sensor) {
-
-			publishTo(sensor)
-
+			eb.Publish(sensor)
+			//publishTo(sensor)
 		}(i)
 	}
 }
@@ -344,7 +348,7 @@ func checkDynamoBotsCache() {
 	for _, i := range res {
 		bots = append(bots, i)
 		spawned = append(spawned, true)
-		chn := make(chan DataEvent, len(sensors))
+		chn := make(chan DataEvent, len(sensorsRequest))
 		ch = append(ch, chn)
 		eb.Subscribe(i, chn)
 	}
@@ -360,6 +364,7 @@ func getResults(w http.ResponseWriter, r *http.Request) {
 }
 
 //spawna un sensore randomico o un numero randomico di sensori?
+/*
 func spawnSensorRand(w http.ResponseWriter, r *http.Request) {
 	var num = mux.Vars(r)["num"]
 	totnum, err := strconv.Atoi(num)
@@ -375,12 +380,11 @@ func spawnSensorRand(w http.ResponseWriter, r *http.Request) {
 		newSensor.Id = shortuuid.New()
 		newSensor.CurrentSector = warehouses[rand.Intn(len(warehouses))]
 		newSensor.Type = topics[rand.Intn(len(topics))]
-		sensors = append(sensors, newSensor)
+		sensorsRequest = append(sensorsRequest, newSensor)
 		AddDBSensor(newSensor)
 		go func(sensor Sensor) {
-
-			publishTo(sensor)
-
+			eb.Publish(newSensor)
+			//publishTo(sensor)
 		}(newSensor)
 	}
 
@@ -389,25 +393,51 @@ func spawnSensorRand(w http.ResponseWriter, r *http.Request) {
 	// what to return? 200 ? dunno
 	//w.Header().Set("Content-Type", "application/json")
 	//json.NewEncoder(w).Encode(newSensor)
-}
+}*/
 
 //spawns a new sensor with given values
 func spawnSensor(w http.ResponseWriter, r *http.Request) {
 	var newSensor Sensor
-	json.NewDecoder(r.Body).Decode(&newSensor)
-	newSensor.Id = shortuuid.New()
-	sensors = append(sensors, newSensor)
 
-	// make channel
-	AddDBSensor(newSensor)
-	go func() {
-		publishTo(newSensor)
-	}()
+	//Genero un numero casuale tra 1 e 10 e se x>7 allora rispondo
+	if rand.Intn(10) > 7 {
+		json.NewDecoder(r.Body).Decode(&newSensor)
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(newSensor)
+		//check if sensor already in system
+		if newSensor.Id != "" {
+			fmt.Println("New message from a sensor alredy in the system with id : " + newSensor.Id)
+		} else {
+			newSensor.Id = shortuuid.New()
+			//sensorsRequest = append(sensorsRequest, newSensor)
+			//AddDBSensor(newSensor)
+		}
+
+		var msg = newSensor.Message
+		var ack = "Ack on message : " + msg + " on sensorn :" + newSensor.Id
+
+		//check if message is a new message or a retransmission
+		if newSensor.Pbrtx {
+
+			fmt.Println("FACCIO FINTA DI ESEGUIRE IL SERVIZIO !")
+		} else if !newSensor.Pbrtx {
+
+			fmt.Println("STO ESEGUENDO IL SERVIZIO !")
+			sensorsRequest = append(sensorsRequest, newSensor)
+			//eb.Publish(newSensor)
+			//TODO fillare la tabella dei sensori con tutti i campi della struct sensorsRequest
+		}
+
+		newSensor.Message = ack
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(newSensor)
+	} else {
+		time.Sleep(500000000 * time.Second)
+		fmt.Println("NON RISPONDO!")
+	}
+
 }
 
+/*
 func spawnBotRand(w http.ResponseWriter, r *http.Request) {
 	var num = mux.Vars(r)["num"]
 	totnum, err := strconv.Atoi(num)
@@ -426,7 +456,7 @@ func spawnBotRand(w http.ResponseWriter, r *http.Request) {
 		bots = append(bots, newBot)
 		spawned = append(spawned, true)
 		AddDBBot(newBot)
-		chn := make(chan DataEvent, len(sensors))
+		chn := make(chan DataEvent, len(sensorsRequest))
 		ch = append(ch, chn)
 		eb.Subscribe(newBot, chn)
 	}
@@ -436,7 +466,7 @@ func spawnBotRand(w http.ResponseWriter, r *http.Request) {
 	// what to return? 200 ? dunno
 	//w.Header().Set("Content-Type", "application/json")
 	//json.NewEncoder(w).Encode(newBot)
-}
+}*/
 
 //spawns a new bot with given values
 func spawnBot(w http.ResponseWriter, r *http.Request) {
@@ -448,7 +478,7 @@ func spawnBot(w http.ResponseWriter, r *http.Request) {
 
 	// make channel
 	AddDBBot(newBot)
-	chn := make(chan DataEvent, len(sensors))
+	chn := make(chan DataEvent, len(sensorsRequest))
 	ch = append(ch, chn)
 	eb.Subscribe(newBot, chn)
 
@@ -495,6 +525,7 @@ func unsubscribeBot(w http.ResponseWriter, r *http.Request) {
 
 }
 
+/*
 func unsubRandomBot(w http.ResponseWriter, r *http.Request) {
 
 	fmt.Println("--- STO IN UNSUB RANDOM BOTS!!")
@@ -514,7 +545,7 @@ func unsubRandomBot(w http.ResponseWriter, r *http.Request) {
 
 	for i := 0; i < totnum; i++ {
 
-		randomIndex := rand.Intn(len(sensors))
+		randomIndex := rand.Intn(len(sensorsRequest))
 		pickedBot := bots[randomIndex]
 
 		fmt.Println("--- pickedSensor id: ", pickedBot.Id)
@@ -530,8 +561,9 @@ func unsubRandomBot(w http.ResponseWriter, r *http.Request) {
 
 	}
 
-}
+}*/
 
+/*
 func killRandomBot(w http.ResponseWriter, r *http.Request) {
 
 	fmt.Println("--- STO IN KILL RANDOM BOTS!!")
@@ -551,8 +583,8 @@ func killRandomBot(w http.ResponseWriter, r *http.Request) {
 
 	for i := 0; i < totnum; i++ {
 
-		randomIndex := rand.Intn(len(sensors))
-		pickedSensor := sensors[randomIndex]
+		randomIndex := rand.Intn(len(sensorsRequest))
+		pickedSensor := sensorsRequest[randomIndex]
 
 		fmt.Println("--- pickedBot id: ", pickedSensor.Id)
 
@@ -588,8 +620,8 @@ func killRandomSensor(w http.ResponseWriter, r *http.Request) {
 
 	for i := 0; i < totnum; i++ {
 
-		randomIndex := rand.Intn(len(sensors))
-		pickedSensor := sensors[randomIndex]
+		randomIndex := rand.Intn(len(sensorsRequest))
+		pickedSensor := sensorsRequest[randomIndex]
 
 		fmt.Println("--- pickedSensor id: ", pickedSensor.Id)
 
@@ -604,7 +636,7 @@ func killRandomSensor(w http.ResponseWriter, r *http.Request) {
 
 	}
 
-}
+}*/
 
 func killSensor(w http.ResponseWriter, r *http.Request) {
 
@@ -636,9 +668,9 @@ func listAllBots(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(bots)
 }
 
-//send sensors list as response
+//send sensorsRequest list as response
 func listAllSensors(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	// Fillo la response e mando la lista di bots
-	json.NewEncoder(w).Encode(sensors)
+	json.NewEncoder(w).Encode(sensorsRequest)
 }

@@ -2,8 +2,6 @@ package main
 
 import (
 	"fmt"
-	"math/rand"
-	"strconv"
 	"sync"
 	"time"
 )
@@ -76,7 +74,6 @@ type Broker struct {
 	rm sync.RWMutex // mutex protect broker against concurrent access from read and write
 }
 
-
 // TODO Unsubscribe method!
 
 func (eb *Broker) Subscribe(bot Bot, ch DataChannel) {
@@ -128,13 +125,14 @@ func (eb *Broker) Subscribe(bot Bot, ch DataChannel) {
 	eb.rm.Unlock()
 }
 
-func (eb *Broker) Publish(sensor Sensor, data interface{}) {
+func (eb *Broker) Publish(sensor Sensor) {
 
 	//TODO come facciamo a lascaire l'event broker viable per altri sensori che vogliono pubblicare senza killare la main subroutine? magari lo circoscriviamo solo
 	//TODO alla creazione delle subroutine cosi locka gli array in uso e quando non servono piu lo slockiamo : unlock-->wait main subroutine e dopo l'unlock può
 	//TODO servire altri sensori 1
 
-	//eb.rm.RLock()
+	var data interface{} = sensor.Message
+	eb.rm.RLock()
 
 	message := data.(string)
 	fmt.Println("MESSAGE IS : " + message + "\n")
@@ -187,12 +185,12 @@ func (eb *Broker) Publish(sensor Sensor, data interface{}) {
 						ch <- data
 						//subroutine awaits for the ack from the bot
 
-						L:
+					L:
 						for {
 
 							select {
 
-							case response := <- myChan:
+							case response := <-myChan:
 								//fmt.Println("BOT ID IS : " + response + "\n")
 								removeResilienceEntry(response, message)
 								fmt.Println("Ack received from bot : !" + response)
@@ -265,7 +263,7 @@ func (eb *Broker) Publish(sensor Sensor, data interface{}) {
 						ch <- data
 						//subroutine awaits for the ack from the bot
 
-						L:
+					L:
 						for {
 
 							select {
@@ -304,7 +302,7 @@ func (eb *Broker) Publish(sensor Sensor, data interface{}) {
 
 		}
 	}
-	//eb.rm.RUnlock()
+	eb.rm.RUnlock()
 }
 
 // init broker
@@ -329,7 +327,7 @@ func swapStandardToNormal() {
 }*/
 
 //function that allow sensor to publish data in an infinite loop
-func publishTo(sensor Sensor) {
+/*func publishTo(sensor Sensor) {
 
 	for {
 		eb.Publish(sensor, strconv.FormatFloat(rand.Float64(), 'E', 1, 64))
@@ -337,11 +335,11 @@ func publishTo(sensor Sensor) {
 
 
 	}
-}
+}*/
 
-func printDataEvent(ch string, data DataEvent) {
+/*func printDataEvent(ch string, data DataEvent) {
 	fmt.Printf("Channel: %s; Topic: %s; DataEvent: %v\n", ch, data.Topic, data.Data)
-}
+}*/
 
 /*func main() {
 	ch1 := make(chan DataEvent)
