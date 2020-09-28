@@ -98,7 +98,7 @@ func GetResilienceEntries() ([]resilienceEntry, error) {
 }
 
 //add sensor to DB
-func AddDBSensor(sensor Sensor) {
+func AddDBSensorRequest(sensor Sensor) {
 	client := initDBClient()
 	av, err := dynamodbattribute.MarshalMap(sensor)
 	input := &dynamodb.PutItemInput{
@@ -112,21 +112,22 @@ func AddDBSensor(sensor Sensor) {
 }
 
 //add every bot id and the message to be sent to this bot in resilience DynamoDb table
-func writeBotIdsAndMessage(botIdsArray []string, message string) {
+func writeBotIdsAndMessage(botsArray []Bot, sensor Sensor) {
 
 	client := initDBClient()
 
 	fmt.Println("BOT IDS ARRAY SIZE IS : \n")
-	fmt.Println(len(botIdsArray))
+	fmt.Println(len(botsArray))
 	fmt.Println("MESSAGE IS : \n")
-	fmt.Println(message)
+	fmt.Println(sensor.Message)
 
-	for _, id := range botIdsArray {
+	for _, bot := range botsArray {
 
-		fmt.Println("Id number : " + id)
+		fmt.Println("Id number : " + bot.Id)
 		var item resilienceEntry
-		item.Id = id
-		item.Message = message
+		item.Id = bot.Id
+		item.Message = sensor.Message
+		item.Sensor = sensor.Id
 
 		av, err := dynamodbattribute.MarshalMap(item)
 		input := &dynamodb.PutItemInput{
@@ -166,11 +167,12 @@ func GetDBSensors() ([]Sensor, error) {
 
 //removes the entry (botId,message) from resilience table if bot identified by botId received correctly message
 //and answered with an ack to te sending goroutine
-func removeResilienceEntry(botId string, message string) {
+func removeResilienceEntry(botId string, message string, sensor string) {
 
 	client := initDBClient()
 	id := botId
 	thisMessage := message
+	thisSensor := sensor
 
 	params := &dynamodb.DeleteItemInput{
 		Key: map[string]*dynamodb.AttributeValue{
@@ -180,18 +182,55 @@ func removeResilienceEntry(botId string, message string) {
 			"message": {
 				S: aws.String(thisMessage),
 			},
+			"sensor": {
+				S: aws.String(thisSensor),
+		},
 		},
 		TableName: aws.String("resilience"),
 	}
 
 	_, err := client.DeleteItem(params)
 	if err != nil {
-		fmt.Println("Got error calling DeleteItem on bot : " + botId + " and with message : " + message + "\n")
+		fmt.Println("Got error calling DeleteItem on bot : " + botId + " and with message : " + message +
+			"from sensor : " + thisSensor + "\n")
 		fmt.Println(err.Error())
 
 	} else {
 
-		fmt.Println("Deleted resielience entry : bot = " + botId + "  and message = " + message + "\n")
+		fmt.Println("Deleted resielience entry : bot = " + botId + "  and message = " + message +
+			"from sensor : " + thisSensor + "\n")
+	}
+}
+
+//removes the entry (botId,message) from resilience table if bot identified by botId received correctly message
+//and answered with an ack to te sending goroutine
+func removePubRequest(sensorId string, message string) {
+
+	client := initDBClient()
+	id := sensorId
+	thisMessage := message
+
+	params := &dynamodb.DeleteItemInput{
+		Key: map[string]*dynamodb.AttributeValue{
+			"id": {
+				S: aws.String(id),
+			},
+			"msg": {
+				S: aws.String(thisMessage),
+			},
+
+		},
+		TableName: aws.String("sensorsRequest"),
+	}
+
+	_, err := client.DeleteItem(params)
+	if err != nil {
+		fmt.Println("Got error calling DeleteItem on sensor : " + id + " and with message : " + thisMessage + "\n")
+		fmt.Println(err.Error())
+
+	} else {
+
+		fmt.Println("Deleted sensorsRequest entry : sensor  = " + id + "  and message = " + thisMessage +  "\n")
 	}
 }
 
@@ -381,12 +420,16 @@ func createTables() {
 	fmt.Println("Created the table", tableNameBots)
 
 	// Create table sensorsRequest
-	tableNameSensors := "sensorsRequest"
+	tableSensorsRequest := "sensorsRequest"
 
 	inputSensors := &dynamodb.CreateTableInput{
 		AttributeDefinitions: []*dynamodb.AttributeDefinition{
 			{
 				AttributeName: aws.String("id"),
+				AttributeType: aws.String("S"),
+			},
+			{
+				AttributeName: aws.String("msg"),
 				AttributeType: aws.String("S"),
 			},
 		},
@@ -395,13 +438,17 @@ func createTables() {
 				AttributeName: aws.String("id"),
 				KeyType:       aws.String("HASH"),
 			},
+			{
+				AttributeName: aws.String("msg"),
+				KeyType:       aws.String("RANGE"),
+			},
 		},
 		ProvisionedThroughput: &dynamodb.ProvisionedThroughput{
 			ReadCapacityUnits:  aws.Int64(10),
 			WriteCapacityUnits: aws.Int64(10),
 		},
 
-		TableName: aws.String(tableNameSensors),
+		TableName: aws.String(tableSensorsRequest),
 	}
 
 	_, err2 := client.CreateTable(inputSensors)
@@ -411,7 +458,7 @@ func createTables() {
 		os.Exit(1)
 	}
 
-	fmt.Println("Created the table", tableNameSensors)
+	fmt.Println("Created the table", tableSensorsRequest)
 
 	// Create table resilience
 	tableNameResilience := "resilience"
@@ -425,7 +472,13 @@ func createTables() {
 			{
 				AttributeName: aws.String("message"),
 				AttributeType: aws.String("S"),
+
 			},
+			{
+				AttributeName: aws.String("sensor"),
+				AttributeType: aws.String("S"),
+			},
+
 		},
 		KeySchema: []*dynamodb.KeySchemaElement{
 			{
@@ -434,6 +487,10 @@ func createTables() {
 			},
 			{
 				AttributeName: aws.String("message"),
+				KeyType:       aws.String("RANGE"),
+			},
+			{
+				AttributeName: aws.String("sensor"),
 				KeyType:       aws.String("RANGE"),
 			},
 		},

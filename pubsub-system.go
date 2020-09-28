@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"sync"
-	"time"
 )
 
 /*
@@ -38,8 +40,6 @@ import (
 
 */
 
-var IDMapToChannel []string
-var SectorMapping []string
 
 type key struct {
 	Topic  string
@@ -52,33 +52,34 @@ type DataEvent struct {
 	ResponseChannel chan string
 }
 
-// DataChannel is a channel which can accept a DataEvent
-type DataChannel chan DataEvent
-
-// DataChannelSlice is a slice of DataChannels
-type DataChannelSlice []DataChannel
+// BotSlice is a slice of Bot
+type BotSlice []Bot
 
 // StringSlice is a slice of strings
 type StringSlice []string
 
 // Broker stores the information about subscribers interested for // a particular topic
 type Broker struct {
-	subscribersCtx map[key]DataChannelSlice
-	subscribers    map[string]DataChannelSlice
 
-	botIdChannelMap  map[string]DataChannel
-	botTopicCtxIdMap map[key]StringSlice
-	botTopicIdMap    map[string]StringSlice
-	botChannelIdMap  map[chan DataEvent]string
-
+	subscribersCtx map[key]BotSlice
+	subscribers    map[string]BotSlice
 	rm sync.RWMutex // mutex protect broker against concurrent access from read and write
+
+	sensorsRequest []Sensor
+	lockQueue sync.RWMutex
+
+}
+
+type subResponse struct {
+
+	BotId   string `json:"id"`
+	Message string `json:"message"`
 }
 
 // TODO Unsubscribe method!
 
-func (eb *Broker) Subscribe(bot Bot, ch DataChannel) {
-	IDMapToChannel = append(IDMapToChannel, bot.Id)
-	SectorMapping = append(SectorMapping, bot.CurrentSector)
+func (eb *Broker) Subscribe(bot Bot) {
+
 	eb.rm.Lock()
 	if contextLock == true {
 		// Context-Aware --> same work as without context but this time we need to search for a couple <Topic, Sector>
@@ -88,231 +89,206 @@ func (eb *Broker) Subscribe(bot Bot, ch DataChannel) {
 		}
 
 		if prev, found := eb.subscribersCtx[internalKey]; found {
-			eb.subscribersCtx[internalKey] = append(prev, ch)
+			eb.subscribersCtx[internalKey] = append(prev, bot)
 		} else {
-			eb.subscribersCtx[internalKey] = append([]DataChannel{}, ch)
+			eb.subscribersCtx[internalKey] = append([]Bot{}, bot)
 		}
 
-		//create mapping botTopicCtx-> botId
-		if prev, found := eb.botTopicCtxIdMap[internalKey]; found {
-			eb.botTopicCtxIdMap[internalKey] = append(prev, bot.Id)
-		} else {
-			eb.botTopicCtxIdMap[internalKey] = append([]string{}, bot.Id)
-		}
 
 	} else {
 		// Without context
 		if prev, found := eb.subscribers[bot.Topic]; found {
-			eb.subscribers[bot.Topic] = append(prev, ch)
+			eb.subscribers[bot.Topic] = append(prev, bot)
 		} else {
-			eb.subscribers[bot.Topic] = append([]DataChannel{}, ch)
+			eb.subscribers[bot.Topic] = append([]Bot{}, bot)
 		}
 
-		//create mapping botTopic -> botId
-		if prev, found := eb.botTopicIdMap[bot.Topic]; found {
-			eb.botTopicIdMap[bot.Topic] = append(prev, bot.Id)
-		} else {
-			eb.botTopicIdMap[bot.Topic] = append([]string{}, bot.Id)
-		}
 	}
-
-	//create mapping botId -> botChannel
-	eb.botIdChannelMap[bot.Id] = ch
-
-	//create mapping botChannel -> botId
-	eb.botChannelIdMap[ch] = bot.Id
 
 	eb.rm.Unlock()
 }
 
 func (eb *Broker) Publish(sensor Sensor) {
 
-	//TODO come facciamo a lascaire l'event broker viable per altri sensori che vogliono pubblicare senza killare la main subroutine? magari lo circoscriviamo solo
-	//TODO alla creazione delle subroutine cosi locka gli array in uso e quando non servono piu lo slockiamo : unlock-->wait main subroutine e dopo l'unlock può
-	//TODO servire altri sensori 1
-
-	var data interface{} = sensor.Message
+	localSensor := sensor
 	eb.rm.RLock()
 
-	message := data.(string)
-	fmt.Println("MESSAGE IS : " + message + "\n")
 
 	if contextLock == true {
 		var internalKey = key{
-			Topic:  sensor.Type,
-			Sector: sensor.CurrentSector,
+			Topic:  localSensor.Type,
+			Sector: localSensor.CurrentSector,
 		}
-		if chans, found := eb.subscribersCtx[internalKey]; found {
+		if bots, found := eb.subscribersCtx[internalKey]; found {
 			fmt.Println("Il lock funziona bene! \n")
 			// this is done because the slices refer to same array even though they are passed by value
 			// thus we are creating a new slice with our elements thus preserve locking correctly.
-			channels := append(DataChannelSlice{}, chans...)
+			myBots := append(BotSlice{}, bots...)
+			eb.rm.RUnlock()
 
-			var wgMainSubroutine sync.WaitGroup
-			//main subroutine which spaws a subroutine for every bot who needs to be notificated and awaits
-			//for every subroutine to receive its pwn ack
-			go func(data DataEvent, dataChannelSlices DataChannelSlice, message string) {
+			//main subroutine spaws a subroutine for every bot who needs to be notified and awaits
+			//for every subroutine to receive its own ack
 
-				wgMainSubroutine.Add(1)
+			var wg sync.WaitGroup
 
-				var wg sync.WaitGroup
-				var botIdsArray []string
+			writeBotIdsAndMessage(myBots, localSensor)
 
-				if botIds, found := eb.botTopicCtxIdMap[internalKey]; found {
+			fmt.Println("RESILIENCE TABLE HAS BEEN FILLED FOR SENSOR : ! " + localSensor.Id + "\n")
 
-					botIdsArray = append(StringSlice{}, botIds...)
-					writeBotIdsAndMessage(botIdsArray, message)
+			//for every bot there is a subroutine which sends the message to the bot and awaits for its ack
+			for _, bot := range myBots {
 
-					fmt.Println("RESILIENCE TABLE HAS BEEN FILLED FOR SENSOR : ! " + sensor.Id + "\n")
-					time.Sleep(10 * time.Second)
+				wg.Add(1)
 
-				} else {
-					//TODO forwardare al frontend
-					fmt.Printf("No bots are subscribed to this sensor type : %v with ctx : %v \n",
-						sensor.Type, sensor.CurrentSector)
-				}
+				myBot := bot
+				go func(bot Bot, sensor Sensor, wg *sync.WaitGroup) {
 
-				//for every bot there is a subroutine which sends the message to it and awaits for its ack
-				for _, ch := range dataChannelSlices {
+					//subroutine awaits for the ack from the bot
 
-					wg.Add(1)
+					myNewBot := bot
+					mySensor := sensor
+					myMessage := mySensor.Message
 
-					go func(ch chan DataEvent, message string, data DataEvent, wg *sync.WaitGroup) {
+					for{
 
-						myChan := make(chan string)
-						data.ResponseChannel = myChan
+						//blocking call : go function awaits for response to its http request
+						response := newRequest(myNewBot,myMessage)
 
-						ch <- data
-						//subroutine awaits for the ack from the bot
+						var dataReceived subResponse
 
-					L:
-						for {
+						err := json.NewDecoder(response.Body).Decode(&dataReceived)
 
-							select {
+						if err == nil {
+							// scenario in which bot responded with ack
 
-							case response := <-myChan:
-								//fmt.Println("BOT ID IS : " + response + "\n")
-								removeResilienceEntry(response, message)
-								fmt.Println("Ack received from bot : !" + response)
-								break L
-
-							case <-time.After(5 * time.Second):
-
-								close(myChan)
-								myChan := make(chan string)
-								data.ResponseChannel = myChan
-								ch <- data
-							}
+							fmt.Println("Ack received successfully from bot :  " + myNewBot.Id + "\n")
+							removeResilienceEntry(dataReceived.BotId, dataReceived.Message, mySensor.Id)
+							break
 
 						}
 
-						wg.Done()
+					}
 
-					}(ch, message, DataEvent{Data: data, Topic: sensor.Type}, &wg)
+					wg.Done()
 
-				}
+				}(myBot, localSensor, &wg)
 
-				//TODO magari unlock qui dell' eb va piu che bene 1
-				//wait all subroutines have received their acks
-				wg.Wait()
+			}
 
-				wgMainSubroutine.Done()
+			//wait all subroutines have received their acks
+			wg.Wait()
 
-			}(DataEvent{Data: data, Topic: sensor.Type}, channels, message)
+			removePubRequest(localSensor.Id,localSensor.Message)
 
-			wgMainSubroutine.Wait()
+		} else {
+
+			removePubRequest(localSensor.Id,localSensor.Message)
+
 		}
 
 	} else {
 
-		if chans, found := eb.subscribers[sensor.Type]; found {
+		if bots, found := eb.subscribers[localSensor.Type]; found {
+			fmt.Println("Il lock funziona bene! \n")
 			// this is done because the slices refer to same array even though they are passed by value
 			// thus we are creating a new slice with our elements thus preserve locking correctly.
-			channels := append(DataChannelSlice{}, chans...)
+			myBots := append(BotSlice{}, bots...)
+			eb.rm.RUnlock()
 
-			var wgMainSubroutine sync.WaitGroup
+			//main subroutine spaws a subroutine for every bot who needs to be notified and awaits
+			//for every subroutine to receive its own ack
 
-			//main subroutine which spaws a subroutine for every bot who needs to be notificated and awaits
-			//for every subroutine to receive its pwn ack
-			go func(data DataEvent, dataChannelSlices DataChannelSlice, message string) {
+			var wg sync.WaitGroup
 
-				wgMainSubroutine.Add(1)
+			writeBotIdsAndMessage(myBots, localSensor)
 
-				var wg sync.WaitGroup
-				var botIdsArray []string
+			fmt.Println("RESILIENCE TABLE HAS BEEN FILLED FOR SENSOR : ! " + localSensor.Id + "\n")
 
-				if botIds, found := eb.botTopicIdMap[sensor.Type]; found {
+			//for every bot there is a subroutine which sends the message to the bot and awaits for its ack
+			for _, bot := range myBots {
 
-					botIdsArray = append(StringSlice{}, botIds...)
-					writeBotIdsAndMessage(botIdsArray, message)
+				wg.Add(1)
 
-				} else {
-					fmt.Println("No bots are subscribed to this sensor type : " + sensor.Type + "\n")
-				}
+				myBot := bot
+				go func(bot Bot, sensor Sensor, wg *sync.WaitGroup) {
 
-				//for every bot there is a subroutine which sends the message to it and awaits for its ack
-				for _, ch := range dataChannelSlices {
+					//subroutine awaits for the ack from the bot
 
-					wg.Add(1)
+					myNewBot := bot
+					mySensor := sensor
+					myMessage := mySensor.Message
 
-					go func(ch chan DataEvent, message string, data DataEvent, wg *sync.WaitGroup) {
+					for{
 
-						myChan := make(chan string)
-						data.ResponseChannel = myChan
+						//blocking call : go function awaits for response to its http request
+						response := newRequest(myNewBot,myMessage)
 
-						ch <- data
-						//subroutine awaits for the ack from the bot
+						var dataReceived subResponse
 
-					L:
-						for {
+						err := json.NewDecoder(response.Body).Decode(&dataReceived)
 
-							select {
+						if err == nil {
+							// scenario in which bot responded with ack
 
-							case response := <-myChan:
-								removeResilienceEntry(response, message)
-								break L
-
-							case <-time.After(10 * time.Second):
-
-								close(myChan)
-								myChan := make(chan string)
-								data.ResponseChannel = myChan
-								ch <- data
-							}
+							fmt.Println("Ack received successfully from bot :  " + myNewBot.Id + "\n")
+							removeResilienceEntry(dataReceived.BotId, dataReceived.Message, mySensor.Id)
+							break
 
 						}
 
-						fmt.Println("Ack received from bot !")
+					}
 
-						wg.Done()
+					wg.Done()
 
-					}(ch, message, DataEvent{Data: data, Topic: sensor.Type}, &wg)
+				}(myBot, localSensor, &wg)
 
-				}
+			}
 
-				//TODO magari unlock qui dell' eb va piu che bene 1
-				//wait all subroutines have received their acks
-				wg.Wait()
+			//wait all subroutines have received their acks
+			wg.Wait()
 
-				wgMainSubroutine.Done()
+			removePubRequest(localSensor.Id,localSensor.Message)
 
-			}(DataEvent{Data: data, Topic: sensor.Type}, channels, message)
+		} else {
 
-			wgMainSubroutine.Wait()
+			removePubRequest(localSensor.Id,localSensor.Message)
 
 		}
+
 	}
-	eb.rm.RUnlock()
+
+}
+
+// function which generates a new http request to notify  bot with message
+func newRequest(bot Bot, message string) (*http.Response){
+
+	request ,err := json.Marshal(map[string]string{
+
+		"msg"   : message,
+		"botId" : bot.Id ,
+	})
+
+	if err!= nil{
+		fmt.Println(err)
+		return nil
+	}
+
+	resp,err := http.Post(bot.IpAddress,"application/json",bytes.NewBuffer(request))
+
+	if err!= nil{
+		fmt.Println(err)
+		return nil
+	}
+
+	return resp
+
 }
 
 // init broker
 var eb = &Broker{
-	subscribers:      map[string]DataChannelSlice{},
-	subscribersCtx:   map[key]DataChannelSlice{},
-	botIdChannelMap:  map[string]DataChannel{},
-	botTopicCtxIdMap: map[key]StringSlice{},
-	botTopicIdMap:    map[string]StringSlice{},
-	botChannelIdMap:  map[chan DataEvent]string{},
+	subscribers:      map[string]BotSlice{},
+	subscribersCtx:   map[key]BotSlice{},
+	sensorsRequest:   []Sensor{},
 }
 
 /*  MAYBE FUTURE IMPLEMENTATION?
