@@ -8,39 +8,6 @@ import (
 	"sync"
 )
 
-/*
-
-	-----------------------------------DataChannelSlice---------------------------------------
-	|
-	|
-	|				-------------------DataChannel0------------------------------------
-	|				|
-	|				|   *---DataEvent0----*   *---DataEvent1----*
-	|				|	|  Data: "msg"	  |	  |  Data: "msg"	|     ...    ...
-	|				|	|  Topic: "topic" |   |  Topic: "topic" |
-	|				|	*-----------------*   *-----------------*
-	|				|
-	|				-------------------------------------------------------------------
-	|
-	|				--------------------DataChannel1-----------------------------------
-	|				|
-	|				|   *---DataEvent0----*   *---DataEvent1----*
-	|				|	|  Data: "msg"	  |	  |  Data: "msg"	|     ...    ...
-	|				|	|  Topic: "topic" |   |  Topic: "topic" |
-	|				|	*-----------------*   *-----------------*
-	|				|
-	|				--------------------------------------------------------------------
-	|
-	|
-	|							...
-	|
-	|							...
-	|
-	-----------------------------------------------------------------------------------------
-
-*/
-
-
 type key struct {
 	Topic  string
 	Sector string
@@ -55,28 +22,50 @@ type DataEvent struct {
 // BotSlice is a slice of Bot
 type BotSlice []Bot
 
-// StringSlice is a slice of strings
-type StringSlice []string
-
 // Broker stores the information about subscribers interested for // a particular topic
 type Broker struct {
-
 	subscribersCtx map[key]BotSlice
 	subscribers    map[string]BotSlice
-	rm sync.RWMutex // mutex protect broker against concurrent access from read and write
+	rm             sync.RWMutex // mutex protect broker against concurrent access from read and write
 
 	sensorsRequest []Sensor
-	lockQueue sync.RWMutex
-
+	lockQueue      sync.RWMutex
 }
 
 type subResponse struct {
-
 	BotId   string `json:"id"`
 	Message string `json:"message"`
 }
 
 // TODO Unsubscribe method!
+func Unsubscribe(bot Bot) {
+	// TODO TESTARE
+	if contextLock == true {
+		var internalKey = key{
+			Topic:  bot.Topic,
+			Sector: bot.CurrentSector,
+		}
+		// trovo l'indice nella slice
+		for k, v := range eb.subscribersCtx[internalKey] {
+			if bot == v {
+				// lo rimuovo
+				if prev, found := eb.subscribersCtx[internalKey]; found {
+					eb.subscribersCtx[internalKey] = append(prev[:k], prev[k+1:]...)
+				}
+			}
+		}
+	} else {
+		// trovo l'indice nella slice
+		for k, v := range eb.subscribers[bot.Topic] {
+			if bot == v {
+				// lo rimuovo
+				if prev, found := eb.subscribers[bot.Topic]; found {
+					eb.subscribers[bot.Topic] = append(prev[:k], prev[k+1:]...)
+				}
+			}
+		}
+	}
+}
 
 func (eb *Broker) Subscribe(bot Bot) {
 
@@ -93,7 +82,6 @@ func (eb *Broker) Subscribe(bot Bot) {
 		} else {
 			eb.subscribersCtx[internalKey] = append([]Bot{}, bot)
 		}
-
 
 	} else {
 		// Without context
@@ -113,7 +101,6 @@ func (eb *Broker) Publish(sensor Sensor) {
 	localSensor := sensor
 	eb.rm.RLock()
 
-
 	if contextLock == true {
 		var internalKey = key{
 			Topic:  localSensor.Type,
@@ -129,18 +116,16 @@ func (eb *Broker) Publish(sensor Sensor) {
 			//main subroutine spaws a subroutine for every bot who needs to be notified and awaits
 			//for every subroutine to receive its own ack
 
-			var wg sync.WaitGroup
-
 			writeBotIdsAndMessage(myBots, localSensor)
 
 			fmt.Println("RESILIENCE TABLE HAS BEEN FILLED FOR SENSOR : ! " + localSensor.Id + "\n")
-
+			var wg sync.WaitGroup
 			//for every bot there is a subroutine which sends the message to the bot and awaits for its ack
 			for _, bot := range myBots {
 
+				myBot := bot
 				wg.Add(1)
 
-				myBot := bot
 				go func(bot Bot, sensor Sensor, wg *sync.WaitGroup) {
 
 					//subroutine awaits for the ack from the bot
@@ -149,41 +134,36 @@ func (eb *Broker) Publish(sensor Sensor) {
 					mySensor := sensor
 					myMessage := mySensor.Message
 
-					for{
-
+					for {
 						//blocking call : go function awaits for response to its http request
-						response := newRequest(myNewBot,myMessage)
+						response := newRequest(myNewBot, myMessage, mySensor)
 
 						var dataReceived subResponse
-
 						err := json.NewDecoder(response.Body).Decode(&dataReceived)
 
 						if err == nil {
-							// scenario in which bot responded with ack
 
-							fmt.Println("Ack received successfully from bot :  " + myNewBot.Id + "\n")
+							// scenario in which bot responded with ack
+							fmt.Println("Ack received successfully from bot :  " + dataReceived.BotId + "\n" + "with\n" +
+								"Message:" + dataReceived.Message + "\n")
+
 							removeResilienceEntry(dataReceived.BotId, dataReceived.Message, mySensor.Id)
 							break
 
+						} else {
+							fmt.Println(err)
+							continue
 						}
-
 					}
 
 					wg.Done()
-
 				}(myBot, localSensor, &wg)
-
 			}
-
 			//wait all subroutines have received their acks
 			wg.Wait()
-
-			removePubRequest(localSensor.Id,localSensor.Message)
-
+			removePubRequest(localSensor.Id, localSensor.Message)
 		} else {
-
-			removePubRequest(localSensor.Id,localSensor.Message)
-
+			removePubRequest(localSensor.Id, localSensor.Message)
 		}
 
 	} else {
@@ -218,10 +198,10 @@ func (eb *Broker) Publish(sensor Sensor) {
 					mySensor := sensor
 					myMessage := mySensor.Message
 
-					for{
+					for {
 
 						//blocking call : go function awaits for response to its http request
-						response := newRequest(myNewBot,myMessage)
+						response := newRequest(myNewBot, myMessage, mySensor)
 
 						var dataReceived subResponse
 
@@ -229,11 +209,10 @@ func (eb *Broker) Publish(sensor Sensor) {
 
 						if err == nil {
 							// scenario in which bot responded with ack
-
-							fmt.Println("Ack received successfully from bot :  " + myNewBot.Id + "\n")
+							fmt.Println("Ack received successfully from bot :  " + dataReceived.BotId + "\n" + "with\n" +
+								"Message:" + dataReceived.Message + "\n")
 							removeResilienceEntry(dataReceived.BotId, dataReceived.Message, mySensor.Id)
 							break
-
 						}
 
 					}
@@ -247,11 +226,11 @@ func (eb *Broker) Publish(sensor Sensor) {
 			//wait all subroutines have received their acks
 			wg.Wait()
 
-			removePubRequest(localSensor.Id,localSensor.Message)
+			removePubRequest(localSensor.Id, localSensor.Message)
 
 		} else {
 
-			removePubRequest(localSensor.Id,localSensor.Message)
+			removePubRequest(localSensor.Id, localSensor.Message)
 
 		}
 
@@ -260,35 +239,35 @@ func (eb *Broker) Publish(sensor Sensor) {
 }
 
 // function which generates a new http request to notify  bot with message
-func newRequest(bot Bot, message string) (*http.Response){
+func newRequest(bot Bot, message string, sensor Sensor) *http.Response {
 
-	request ,err := json.Marshal(map[string]string{
-
-		"msg"   : message,
-		"botId" : bot.Id ,
+	request, err := json.Marshal(map[string]string{
+		"msg":       message,
+		"botId":     bot.Id,
+		"bot_cs":    bot.CurrentSector,
+		"sensor":    sensor.Id,
+		"sensor_cs": sensor.CurrentSector,
 	})
 
-	if err!= nil{
+	if err != nil {
 		fmt.Println(err)
 		return nil
 	}
 
-	resp,err := http.Post(bot.IpAddress,"application/json",bytes.NewBuffer(request))
+	resp, err := http.Post("http://"+bot.IpAddress+":5001/", "application/json", bytes.NewBuffer(request))
 
-	if err!= nil{
+	if err != nil {
 		fmt.Println(err)
 		return nil
 	}
-
 	return resp
-
 }
 
 // init broker
 var eb = &Broker{
-	subscribers:      map[string]BotSlice{},
-	subscribersCtx:   map[key]BotSlice{},
-	sensorsRequest:   []Sensor{},
+	subscribers:    map[string]BotSlice{},
+	subscribersCtx: map[key]BotSlice{},
+	sensorsRequest: []Sensor{},
 }
 
 /*  MAYBE FUTURE IMPLEMENTATION?

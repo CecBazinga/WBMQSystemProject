@@ -48,15 +48,12 @@ type Sensor struct {
 type resilienceEntry struct {
 	Id      string `json:"id"`
 	Message string `json:"message"`
-	Sensor  string `json:"sensor"`
 }
 
 var bots []Bot
-var warehouses []string
 var topics []string
 var ch []chan DataEvent
 var contextLock = false
-var results []Result
 var dynamoDBSession *dynamodb.DynamoDB = nil
 var sensorRequest sync.WaitGroup
 
@@ -76,16 +73,12 @@ func main() {
 
 	checkDynamoBotsCache()
 
-
 	fmt.Println("System started working \n")
 	//checkResilience()
 
 	//checkDynamoSensorsCache()
 
-	initWarehouseSpaces()
 	initTopics()
-
-	router.HandleFunc("/results", getResults).Methods("GET")
 
 	router.HandleFunc("/status", heartBeatMonitoring).Methods("GET")
 	router.HandleFunc("/switch", switchContext).Methods("POST")
@@ -96,15 +89,11 @@ func main() {
 	router.HandleFunc("/killSingleBot", killBot).Methods("POST")
 	//router.HandleFunc("/killRandomBot/{num}", killRandomBot).Methods("POST")
 	router.HandleFunc("/bot", spawnBot).Methods("POST")
-	//router.HandleFunc("/bot/{num}", spawnBotRand).Methods("POST")
-	router.HandleFunc("/bot", listAllBots).Methods("GET")
 
 	// TODO KILL BOT SENSOR
 	//router.HandleFunc("/killRandomSensor/{num}", killRandomSensor).Methods("POST")
 	router.HandleFunc("/killSingleSensor", killSensor).Methods("POST")
 	router.HandleFunc("/sensor", spawnSensor).Methods("POST")
-	//router.HandleFunc("/sensor/{num}", spawnSensorRand).Methods("POST")
-	router.HandleFunc("/sensor", listAllSensors).Methods("GET")
 
 	// linea standard per mettere in ascolto l'app. TODO controllo d'errore
 	go func() {
@@ -116,7 +105,7 @@ func main() {
 
 	for {
 
-		if len( eb.sensorsRequest) > 0 {
+		if len(eb.sensorsRequest) > 0 {
 
 			request := eb.sensorsRequest[0]
 			sensorRequest.Add(1)
@@ -124,8 +113,8 @@ func main() {
 			go func(request Sensor) {
 
 				myRequest := request
-				sensorRequest.Done()
 				eb.Publish(myRequest)
+				sensorRequest.Done()
 
 			}(request)
 
@@ -170,22 +159,6 @@ func initTopics() {
 		"motion")
 }
 
-// STATIC OBJECT IN THE SYSTEM
-func initWarehouseSpaces() {
-	warehouses = make([]string, 0)
-	warehouses = append(warehouses,
-		"a1",
-		"a2",
-		"a3",
-		"a4",
-		"b1",
-		"b2",
-		"c1",
-		"c2",
-		"c3",
-		"c4")
-}
-
 //check for first element inserted by command-line to create a context/non context aware environment
 func checkCli() {
 	if len(os.Args) > 1 {
@@ -198,7 +171,7 @@ func checkCli() {
 	}
 }
 
-// MAYBE FUTURE IMPLEMENTATION?
+// MAYBE FUTURE IMPLEMENTATION? Figo da implementare switch context a runtime?
 func switchContext(w http.ResponseWriter, r *http.Request) {
 	if contextLock == true {
 		contextLock = false
@@ -221,8 +194,6 @@ func heartBeatMonitoring(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-
-
 // retrieve sensor state from DB and initializes any sensor to spawn data (if any sensor is found)
 func checkDynamoSensorsCache() {
 	res, err := GetDBSensors()
@@ -242,9 +213,6 @@ func checkDynamoSensorsCache() {
 func checkDynamoBotsCache() {
 	res, err := GetDBBots()
 
-	//fmt.Println(res)
-	//fmt.Println(err)
-
 	if err != nil {
 		panic(err)
 	}
@@ -255,16 +223,6 @@ func checkDynamoBotsCache() {
 		eb.Subscribe(i)
 	}
 }
-
-//function to get first 50 results everytime
-func getResults(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	// Need to set a ceil value for the results to send ... 50 now
-	resultsTrunc := results[:50] // [ [1,2, ... ,50], 51, 52, 53 ... ]
-	json.NewEncoder(w).Encode(resultsTrunc)
-	results = results[50:] // [50, 51, 52, 53 ... ]
-}
-
 
 //spawns a new sensor with given values
 func spawnSensor(w http.ResponseWriter, r *http.Request) {
@@ -295,7 +253,6 @@ func spawnSensor(w http.ResponseWriter, r *http.Request) {
 
 	} else if !newSensor.Pbrtx {
 
-		fmt.Println("STO ESEGUENDO IL SERVIZIO !")
 		AddDBSensorRequest(newSensor)
 		eb.lockQueue.Lock()
 		eb.sensorsRequest = append(eb.sensorsRequest, newSensor)
@@ -303,13 +260,10 @@ func spawnSensor(w http.ResponseWriter, r *http.Request) {
 		//eb.Publish(newSensor)
 
 	}
-
 	newSensor.Message = ack
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(newSensor)
-
 }
-
 
 //spawns a new bot with given values
 func spawnBot(w http.ResponseWriter, r *http.Request) {
@@ -351,24 +305,22 @@ func killSensor(w http.ResponseWriter, r *http.Request) {
 
 }
 
-//send bots list as response
-func listAllBots(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	// Fillo la response e mando la lista di bots
-	json.NewEncoder(w).Encode(bots)
-}
-
-//send sensorsRequest list as response
-func listAllSensors(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	// Fillo la response e mando la lista di bots
-	json.NewEncoder(w).Encode(eb.sensorsRequest)
-}
-
 //unsubscribes bot with a given Id from current topic
 func unsubscribeBot(w http.ResponseWriter, r *http.Request) {
 
-	var id string
+	/* Versione roberto, TODO TESTARE
+	var newBot Bot
+	json.NewDecoder(r.Body).Decode(&newBot)
+
+	// chek errore!
+	Unsubscribe(newBot)
+
+	w.Header().Set("Content-Type", "application/json")
+	// send back some ack
+	json.NewEncoder(w).Encode(newBot)
+	*/
+
+	/*var id string
 	var check bool
 
 	json.NewDecoder(r.Body).Decode(&id)
@@ -388,20 +340,7 @@ func unsubscribeBot(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(newBot)
 
-	}
-
-	//fmt.Printf("----len", len(eb.subscribersCtx))
-	/*
-		for i := 0; i < len(eb.subscribers); i++ {
-			//fmt.Printf("value of a: %d\n", a)
-			subscribers := eb.subscribers
-			print(&subscribers)
-		}
-
-		print(eb.subscribersCtx)
-
-	*/
-
+	}*/
 }
 
 //spawna un sensore randomico o un numero randomico di sensori?
@@ -640,6 +579,3 @@ func checkResilience() {
 
 }
 */
-
-
-

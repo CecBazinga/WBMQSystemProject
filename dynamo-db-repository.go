@@ -125,9 +125,8 @@ func writeBotIdsAndMessage(botsArray []Bot, sensor Sensor) {
 
 		fmt.Println("Id number : " + bot.Id)
 		var item resilienceEntry
-		item.Id = bot.Id
+		item.Id = bot.Id + sensor.Id
 		item.Message = sensor.Message
-		item.Sensor = sensor.Id
 
 		av, err := dynamodbattribute.MarshalMap(item)
 		input := &dynamodb.PutItemInput{
@@ -170,7 +169,7 @@ func GetDBSensors() ([]Sensor, error) {
 func removeResilienceEntry(botId string, message string, sensor string) {
 
 	client := initDBClient()
-	id := botId
+	id := botId + sensor
 	thisMessage := message
 	thisSensor := sensor
 
@@ -182,9 +181,6 @@ func removeResilienceEntry(botId string, message string, sensor string) {
 			"message": {
 				S: aws.String(thisMessage),
 			},
-			"sensor": {
-				S: aws.String(thisSensor),
-		},
 		},
 		TableName: aws.String("resilience"),
 	}
@@ -218,19 +214,17 @@ func removePubRequest(sensorId string, message string) {
 			"msg": {
 				S: aws.String(thisMessage),
 			},
-
 		},
 		TableName: aws.String("sensorsRequest"),
 	}
 
 	_, err := client.DeleteItem(params)
 	if err != nil {
-		fmt.Println("Got error calling DeleteItem on sensor : " + id + " and with message : " + thisMessage + "\n")
+		fmt.Println("Got error calling DeleteItem on PubRequest on sensor : " + id + " and with message : " + thisMessage + "\n")
 		fmt.Println(err.Error())
 
 	} else {
-
-		fmt.Println("Deleted sensorsRequest entry : sensor  = " + id + "  and message = " + thisMessage +  "\n")
+		fmt.Println("Deleted sensorsRequest entry : sensor  = " + id + "  and message = " + thisMessage + "\n")
 	}
 }
 
@@ -472,13 +466,7 @@ func createTables() {
 			{
 				AttributeName: aws.String("message"),
 				AttributeType: aws.String("S"),
-
 			},
-			{
-				AttributeName: aws.String("sensor"),
-				AttributeType: aws.String("S"),
-			},
-
 		},
 		KeySchema: []*dynamodb.KeySchemaElement{
 			{
@@ -487,10 +475,6 @@ func createTables() {
 			},
 			{
 				AttributeName: aws.String("message"),
-				KeyType:       aws.String("RANGE"),
-			},
-			{
-				AttributeName: aws.String("sensor"),
 				KeyType:       aws.String("RANGE"),
 			},
 		},
