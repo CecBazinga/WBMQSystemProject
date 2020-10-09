@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"sync"
+	"time"
 )
 
 type key struct {
@@ -126,43 +128,15 @@ func (eb *Broker) Publish(sensor Sensor) {
 				myBot := bot
 				wg.Add(1)
 
-				go func(bot Bot, sensor Sensor, wg *sync.WaitGroup) {
+				go publishImplementation(myBot, localSensor, &wg)
 
-					//subroutine awaits for the ack from the bot
-
-					myNewBot := bot
-					mySensor := sensor
-					myMessage := mySensor.Message
-
-					for {
-						//blocking call : go function awaits for response to its http request
-						response := newRequest(myNewBot, myMessage, mySensor)
-
-						var dataReceived subResponse
-						err := json.NewDecoder(response.Body).Decode(&dataReceived)
-
-						if err == nil {
-
-							// scenario in which bot responded with ack
-							fmt.Println("Ack received successfully from bot :  " + dataReceived.BotId + "\n" + "with\n" +
-								"Message:" + dataReceived.Message + "\n")
-
-							removeResilienceEntry(dataReceived.BotId, dataReceived.Message, mySensor.Id)
-							break
-
-						} else {
-							fmt.Println(err)
-							continue
-						}
-					}
-
-					wg.Done()
-				}(myBot, localSensor, &wg)
 			}
 			//wait all subroutines have received their acks
 			wg.Wait()
+
 			removePubRequest(localSensor.Id, localSensor.Message)
 		} else {
+			eb.rm.RUnlock()
 			removePubRequest(localSensor.Id, localSensor.Message)
 		}
 
@@ -187,39 +161,10 @@ func (eb *Broker) Publish(sensor Sensor) {
 			//for every bot there is a subroutine which sends the message to the bot and awaits for its ack
 			for _, bot := range myBots {
 
+				myBot := bot
 				wg.Add(1)
 
-				myBot := bot
-				go func(bot Bot, sensor Sensor, wg *sync.WaitGroup) {
-
-					//subroutine awaits for the ack from the bot
-
-					myNewBot := bot
-					mySensor := sensor
-					myMessage := mySensor.Message
-
-					for {
-
-						//blocking call : go function awaits for response to its http request
-						response := newRequest(myNewBot, myMessage, mySensor)
-
-						var dataReceived subResponse
-
-						err := json.NewDecoder(response.Body).Decode(&dataReceived)
-
-						if err == nil {
-							// scenario in which bot responded with ack
-							fmt.Println("Ack received successfully from bot :  " + dataReceived.BotId + "\n" + "with\n" +
-								"Message:" + dataReceived.Message + "\n")
-							removeResilienceEntry(dataReceived.BotId, dataReceived.Message, mySensor.Id)
-							break
-						}
-
-					}
-
-					wg.Done()
-
-				}(myBot, localSensor, &wg)
+				go publishImplementation(myBot, localSensor, &wg)
 
 			}
 
@@ -230,12 +175,74 @@ func (eb *Broker) Publish(sensor Sensor) {
 
 		} else {
 
+			eb.rm.RUnlock()
 			removePubRequest(localSensor.Id, localSensor.Message)
 
 		}
 
 	}
 
+}
+
+//retransmits a single message to a single bot until receives an ack from it (at least one semantic)
+func publishImplementation(bot Bot, sensor Sensor, wg *sync.WaitGroup) {
+
+	//subroutine awaits for the ack from the bot
+
+	myNewBot := bot
+	mySensor := sensor
+	myMessage := mySensor.Message
+
+
+	//blocking call : go function awaits for response to its http request
+	response := newRequest(myNewBot, myMessage, mySensor)
+
+	var dataReceived subResponse
+	err := json.NewDecoder(response.Body).Decode(&dataReceived)
+
+
+	if err == nil {
+
+		// scenario in which bot responded with ack
+		fmt.Println("Ack received successfully from bot :  " + dataReceived.BotId + "\n" + "with\n" +
+			"Message:" + dataReceived.Message + "\n")
+
+		removeResilienceEntry(dataReceived.BotId, dataReceived.Message, mySensor.Id)
+
+
+	} else if err,ok := err.(net.Error); ok && err.Timeout() {
+
+		fmt.Println("HOOKIN FOR BOOTY GOT TIMEOUT !!!")
+
+		for {
+
+			newResponse := newRequest(myNewBot, myMessage, mySensor)
+			newErr := json.NewDecoder(newResponse.Body).Decode(&dataReceived)
+
+			// got the right ack message so i cans top retransmitting
+			if newErr == nil && dataReceived.BotId == myNewBot.Id && dataReceived.Message == myMessage {
+				fmt.Println("HOOKIN FOR BOOTY GOT RIGHT ACK MESSAGE, GONNA STOP RETRANSMISSION !!!")
+				break
+
+			}else if newErr , ok := newErr.(net.Error); ok && newErr.Timeout(){
+				fmt.Println("GOT TIMEOUTED AGAIN SO I WILL RETRY ONE TIME MORE !!!")
+				continue
+
+			}else{
+				fmt.Println("GOT BOT ERROR NOT RESPONDING SO I WILL RETRY LATER ON !!!")
+				time.Sleep(20*time.Second)
+				continue
+			}
+		}
+
+	}else {
+		//got connection error
+		fmt.Println(err)
+
+	}
+
+
+	wg.Done()
 }
 
 // function which generates a new http request to notify  bot with message

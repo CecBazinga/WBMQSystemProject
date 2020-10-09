@@ -78,7 +78,6 @@ func GetResilienceEntries() ([]resilienceEntry, error) {
 	fmt.Println("Params are", params)
 	result, err := client.Scan(params)
 	if err != nil {
-		fmt.Println("Step A")
 		fmt.Println(err)
 		return nil, err
 	}
@@ -88,13 +87,40 @@ func GetResilienceEntries() ([]resilienceEntry, error) {
 		entry := resilienceEntry{}
 		err = dynamodbattribute.UnmarshalMap(i, &entry)
 		if err != nil {
-			fmt.Println("Step B")
 			fmt.Println(err)
 			return nil, err
 		}
 		resilienceList = append(resilienceList, entry)
 	}
 	return resilienceList, nil
+}
+
+// return the list of sensor publish request which need to be retransmitted
+func GetRequestEntries() ([]Sensor, error) {
+	client := initDBClient()
+	params := &dynamodb.ScanInput{
+		TableName: aws.String("sensorsRequest"),
+	}
+
+	fmt.Println("Params are", params)
+	result, err := client.Scan(params)
+	if err != nil {
+		fmt.Println(err)
+		return nil, err
+	}
+
+	var requestList = []Sensor{}
+	for _, i := range result.Items {
+		entry := Sensor{}
+		err = dynamodbattribute.UnmarshalMap(i, &entry)
+		if err != nil {
+			fmt.Println(err)
+			return nil, err
+		}
+		requestList = append(requestList, entry)
+	}
+
+	return requestList, nil
 }
 
 //add sensor to DB

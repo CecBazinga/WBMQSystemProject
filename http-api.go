@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -56,6 +57,7 @@ var ch []chan DataEvent
 var contextLock = false
 var dynamoDBSession *dynamodb.DynamoDB = nil
 var sensorRequest sync.WaitGroup
+var resilienceLock sync.WaitGroup
 
 func main() {
 	router := mux.NewRouter()
@@ -74,9 +76,18 @@ func main() {
 	checkDynamoBotsCache()
 
 	fmt.Println("System started working \n")
-	//checkResilience()
+
 
 	//checkDynamoSensorsCache()
+
+	//get lock because i want to be sure no other function works on db in this moment, to get a copy of system's pre
+	//crash state
+	resilienceLock.Add(1)
+	go checkResilience()
+	fmt.Println("Waiting for checkresilience to read from DB")
+	resilienceLock.Wait()
+
+	fmt.Println("End of waiting for checkresilience to read from DB")
 
 	initTopics()
 
@@ -97,7 +108,6 @@ func main() {
 
 	// linea standard per mettere in ascolto l'app. TODO controllo d'errore
 	go func() {
-
 		log.Fatal(http.ListenAndServe(":5000", router))
 	}()
 
@@ -108,19 +118,23 @@ func main() {
 		if len(eb.sensorsRequest) > 0 {
 
 			request := eb.sensorsRequest[0]
+			fmt.Println("THE MESSAGE IS : " + request.Message +"\n")
 			sensorRequest.Add(1)
 
 			go func(request Sensor) {
 
 				myRequest := request
-				eb.Publish(myRequest)
 				sensorRequest.Done()
+				eb.Publish(myRequest)
+
 
 			}(request)
 
 			sensorRequest.Wait()
 			eb.lockQueue.Lock()
-			eb.sensorsRequest = eb.sensorsRequest[1:]
+
+			eb.sensorsRequest = append(eb.sensorsRequest[:0],eb.sensorsRequest[1:]...)
+
 			eb.lockQueue.Unlock()
 
 		}
@@ -218,9 +232,10 @@ func checkDynamoBotsCache() {
 	}
 	for _, i := range res {
 		bots = append(bots, i)
-		chn := make(chan DataEvent, len(eb.sensorsRequest))
-		ch = append(ch, chn)
 		eb.Subscribe(i)
+		//chn := make(chan DataEvent, len(eb.sensorsRequest))
+		//ch = append(ch, chn)
+
 	}
 }
 
@@ -304,6 +319,106 @@ func killSensor(w http.ResponseWriter, r *http.Request) {
 	}
 
 }
+
+func checkResilience() {
+
+	resilience, err := GetResilienceEntries()
+	if err != nil {
+		panic(err)
+	}
+
+	requestSlice,err1 := GetRequestEntries()
+	if err1 != nil {
+		panic(err)
+	}
+
+	//once i got the system's state before ccrash i can release lock for main to gon on and listen and serve new requests
+	//while i serve the older ones too
+	resilienceLock.Done()
+
+	fmt.Println("RESILIENCE CHECK SIZE IS : \n")
+	fmt.Println(len(resilience))
+
+	fmt.Println("REQUEST CHECK SIZE IS : \n")
+	fmt.Println(len(requestSlice))
+
+	var mainWg sync.WaitGroup
+
+	//for every bot there is a subroutine which sends the message to it and awaits for its ack
+	for _, requestItem := range requestSlice {
+
+		mainWg.Add(1)
+
+		go func(mySensor Sensor) {
+
+			var wg sync.WaitGroup
+
+			myRequestItem := requestItem
+			requestResilienceEntries := []resilienceEntry{}
+
+			var sensor Sensor
+			sensor.Id = myRequestItem.Id
+			sensor.Message = myRequestItem.Message
+			sensor.Type = myRequestItem.Type
+			sensor.Pbrtx = myRequestItem.Pbrtx
+			sensor.CurrentSector = myRequestItem.CurrentSector
+
+			//for every request creates the list of its own resilience entries
+			for _, resilienceItem := range resilience {
+
+				if resilienceItem.Message == sensor.Message && strings.Contains(resilienceItem.Id, sensor.Id ) {
+
+					requestResilienceEntries = append(requestResilienceEntries, resilienceItem)
+				}
+			}
+
+			//retransmit the request to every entry
+			for _, resilienceItem := range requestResilienceEntries {
+
+				myBot := findBotbyId(strings.ReplaceAll(resilienceItem.Id,myRequestItem.Id,""))
+
+				if myBot.Id == ""  {
+					fmt.Println("NO BOT ASSOCIATED WITH THIS RESILIENCE ENTRY : SOMETHING WRONG \n")
+					fmt.Println(strings.ReplaceAll(resilienceItem.Id,myRequestItem.Id,"") + "\n")
+
+				}else if myBot.Id != ""{
+
+					wg.Add(1)
+
+					go publishImplementation(myBot, sensor, &wg)
+				}
+
+			}
+
+			//awaits for all subroutines to end with an ack
+			wg.Wait()
+
+			removePubRequest(sensor.Id, sensor.Message)
+
+			mainWg.Done()
+
+		}(requestItem)
+
+	}
+
+	mainWg.Wait()
+}
+
+
+func findBotbyId(id string) Bot {
+
+	for _,bot := range bots {
+
+		if bot.Id == id {
+
+			return bot
+		}
+	}
+	var emptyBot Bot
+
+	return emptyBot
+}
+
 
 //unsubscribes bot with a given Id from current topic
 func unsubscribeBot(w http.ResponseWriter, r *http.Request) {
@@ -519,63 +634,5 @@ func killRandomSensor(w http.ResponseWriter, r *http.Request) {
 
 }
 
-func checkResilience() {
 
-	res, err := GetResilienceEntries()
-	if err != nil {
-		panic(err)
-	}
-
-	fmt.Println("RESILIENCE CHECK SIZE IS : \n")
-	fmt.Println(len(res))
-
-	var wg sync.WaitGroup
-
-	//for every bot there is a subroutine which sends the message to it and awaits for its ack
-	for _, resilienceItem := range res {
-
-		//fmt.Println("IO QUI  CI ENTRO : \n")
-		ch := eb.botIdChannelMap[resilienceItem.Id]
-		wg.Add(1)
-
-		go func(ch chan DataEvent, message string, wg *sync.WaitGroup) {
-
-			fmt.Println("IO QUI CI ENTRO 2 : \n")
-			myChan := make(chan string)
-			var data = DataEvent{Data: resilienceItem.Message, ResponseChannel: myChan}
-
-			ch <- data
-			//subroutine awaits for the ack from the bot
-
-		L:
-			for {
-
-				select {
-
-				case response := <-myChan:
-					removeResilienceEntry(response, message)
-					fmt.Println("Ack received from bot !")
-					break L
-
-				case <-time.After(10 * time.Second):
-
-					close(myChan)
-					myChan := make(chan string)
-					data.ResponseChannel = myChan
-					ch <- data
-				}
-
-			}
-
-			wg.Done()
-
-		}(ch, resilienceItem.Message, &wg)
-
-	}
-
-	//wait all subroutines have received their acks
-	wg.Wait()
-	fmt.Println("QUI CI ARRIVO E TERMINO !\n")
-
-}
 */
