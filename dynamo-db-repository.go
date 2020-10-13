@@ -290,7 +290,6 @@ func removeBot(id string) (bool, error) {
 	fmt.Println("id bot: ", id)
 
 	input := &dynamodb.DeleteItemInput{
-		//Item:      av,
 		TableName: aws.String("bots"),
 		Key: map[string]*dynamodb.AttributeValue{
 			"id": {
@@ -302,7 +301,7 @@ func removeBot(id string) (bool, error) {
 	_, err = client.DeleteItem(input)
 	if err != nil {
 		fmt.Println(err.Error())
-		return false, nil
+		return false, err
 	}
 
 	fmt.Println("---- Bot " + id + " was successfully removed ")

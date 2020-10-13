@@ -25,6 +25,8 @@ type Result struct {
 // Ping
 type Ping struct {
 	CtxStatus string    `json:"status"`
+	TotBot    int       `json:"totbot"`
+	TotSens   int       `json:"totsens"`
 	Timestamp time.Time `json:"timestamp"`
 }
 
@@ -77,9 +79,6 @@ func main() {
 
 	fmt.Println("System started working \n")
 
-
-	//checkDynamoSensorsCache()
-
 	//get lock because i want to be sure no other function works on db in this moment, to get a copy of system's pre
 	//crash state
 	resilienceLock.Add(1)
@@ -92,18 +91,10 @@ func main() {
 	initTopics()
 
 	router.HandleFunc("/status", heartBeatMonitoring).Methods("GET")
-	router.HandleFunc("/switch", switchContext).Methods("POST")
 
-	// TODO KILL BOT ROUTE
 	router.HandleFunc("/unsubscribeBot", unsubscribeBot).Methods("POST")
-	//router.HandleFunc("/unsubscribeRandomBot/{num}", unsubRandomBot).Methods("POST")
-	router.HandleFunc("/killSingleBot", killBot).Methods("POST")
-	//router.HandleFunc("/killRandomBot/{num}", killRandomBot).Methods("POST")
 	router.HandleFunc("/bot", spawnBot).Methods("POST")
 
-	// TODO KILL BOT SENSOR
-	//router.HandleFunc("/killRandomSensor/{num}", killRandomSensor).Methods("POST")
-	router.HandleFunc("/killSingleSensor", killSensor).Methods("POST")
 	router.HandleFunc("/sensor", spawnSensor).Methods("POST")
 
 	// linea standard per mettere in ascolto l'app. TODO controllo d'errore
@@ -118,50 +109,32 @@ func main() {
 		if len(eb.sensorsRequest) > 0 {
 
 			request := eb.sensorsRequest[0]
-			fmt.Println("THE MESSAGE IS : " + request.Message +"\n")
+			fmt.Println("THE MESSAGE IS : " + request.Message + "\n")
 			sensorRequest.Add(1)
 
 			go func(request Sensor) {
 
+				fmt.Println("LEN inside main go func: -----------------------------")
+				fmt.Println(len(eb.subscribersCtx))
+				fmt.Println(eb.subscribersCtx)
+				fmt.Println("------------------------------------------------------")
+
 				myRequest := request
 				sensorRequest.Done()
 				eb.Publish(myRequest)
-
 
 			}(request)
 
 			sensorRequest.Wait()
 			eb.lockQueue.Lock()
 
-			eb.sensorsRequest = append(eb.sensorsRequest[:0],eb.sensorsRequest[1:]...)
+			eb.sensorsRequest = append(eb.sensorsRequest[:0], eb.sensorsRequest[1:]...)
 
 			eb.lockQueue.Unlock()
 
 		}
 
 	}
-	//endlessWait.Wait()
-}
-
-func killBot(w http.ResponseWriter, r *http.Request) {
-
-	var id string
-
-	var check bool
-
-	json.NewDecoder(r.Body).Decode(&id)
-	fmt.Println("id bot: ", id)
-
-	//var err bool
-	check, _ = removeBot(id)
-
-	if check == false {
-		fmt.Println("--- Error: bot was not killed")
-	} else {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(id)
-	}
-
 }
 
 // STATIC OBJECT IN THE SYSTEM
@@ -185,15 +158,6 @@ func checkCli() {
 	}
 }
 
-// MAYBE FUTURE IMPLEMENTATION? Figo da implementare switch context a runtime?
-func switchContext(w http.ResponseWriter, r *http.Request) {
-	if contextLock == true {
-		contextLock = false
-	} else {
-		contextLock = true
-	}
-}
-
 // function to ping the application
 func heartBeatMonitoring(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
@@ -201,26 +165,12 @@ func heartBeatMonitoring(w http.ResponseWriter, r *http.Request) {
 	pingNow.Timestamp = time.Now()
 	if contextLock == true {
 		pingNow.CtxStatus = "alivectx"
-		json.NewEncoder(w).Encode(pingNow)
 	} else {
 		pingNow.CtxStatus = "alive"
-		json.NewEncoder(w).Encode(pingNow)
 	}
-}
-
-// retrieve sensor state from DB and initializes any sensor to spawn data (if any sensor is found)
-func checkDynamoSensorsCache() {
-	res, err := GetDBSensors()
-	if err != nil {
-		panic(err)
-	}
-	for _, i := range res {
-		eb.sensorsRequest = append(eb.sensorsRequest, i)
-		go func(sensor Sensor) {
-			eb.Publish(sensor)
-			//publishTo(sensor)
-		}(i)
-	}
+	pingNow.TotBot = len(bots)
+	pingNow.TotSens = len(eb.sensorsRequest)
+	json.NewEncoder(w).Encode(pingNow)
 }
 
 //retrieve bots state from DB if any robot is found and subscribe them to their topics
@@ -233,9 +183,6 @@ func checkDynamoBotsCache() {
 	for _, i := range res {
 		bots = append(bots, i)
 		eb.Subscribe(i)
-		//chn := make(chan DataEvent, len(eb.sensorsRequest))
-		//ch = append(ch, chn)
-
 	}
 }
 
@@ -272,7 +219,6 @@ func spawnSensor(w http.ResponseWriter, r *http.Request) {
 		eb.lockQueue.Lock()
 		eb.sensorsRequest = append(eb.sensorsRequest, newSensor)
 		eb.lockQueue.Unlock()
-		//eb.Publish(newSensor)
 
 	}
 	newSensor.Message = ack
@@ -287,37 +233,11 @@ func spawnBot(w http.ResponseWriter, r *http.Request) {
 	newBot.Id = shortuuid.New()
 	bots = append(bots, newBot)
 
-	// make channel
 	AddDBBot(newBot)
-	chn := make(chan DataEvent, len(eb.sensorsRequest))
-	ch = append(ch, chn)
 	eb.Subscribe(newBot)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(newBot)
-}
-
-func killSensor(w http.ResponseWriter, r *http.Request) {
-
-	//var id = "gni5otQjDyhUWmvBE8EWS4"
-
-	fmt.Println("-- STO IN KILL SENSOR ")
-	var id string
-	var check bool
-
-	json.NewDecoder(r.Body).Decode(&id)
-	fmt.Println("id sensor: ", id)
-	//var err bool
-	check, _ = removeSensor(id)
-	if check == false {
-		fmt.Println("--- Error: sensor was not killed")
-	} else {
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(id)
-
-	}
-
 }
 
 func checkResilience() {
@@ -327,7 +247,7 @@ func checkResilience() {
 		panic(err)
 	}
 
-	requestSlice,err1 := GetRequestEntries()
+	requestSlice, err1 := GetRequestEntries()
 	if err1 != nil {
 		panic(err)
 	}
@@ -366,32 +286,35 @@ func checkResilience() {
 			//for every request creates the list of its own resilience entries
 			for _, resilienceItem := range resilience {
 
-				if resilienceItem.Message == sensor.Message && strings.Contains(resilienceItem.Id, sensor.Id ) {
+				if resilienceItem.Message == sensor.Message && strings.Contains(resilienceItem.Id, sensor.Id) {
 
 					requestResilienceEntries = append(requestResilienceEntries, resilienceItem)
 				}
 			}
 
-			//retransmit the request to every entry
-			for _, resilienceItem := range requestResilienceEntries {
+			if len(requestResilienceEntries) > 0 {
 
-				myBot := findBotbyId(strings.ReplaceAll(resilienceItem.Id,myRequestItem.Id,""))
+				//retransmit the request to every entry
+				for _, resilienceItem := range requestResilienceEntries {
 
-				if myBot.Id == ""  {
-					fmt.Println("NO BOT ASSOCIATED WITH THIS RESILIENCE ENTRY : SOMETHING WRONG \n")
-					fmt.Println(strings.ReplaceAll(resilienceItem.Id,myRequestItem.Id,"") + "\n")
+					myBot := findBotbyId(strings.ReplaceAll(resilienceItem.Id, myRequestItem.Id, ""))
 
-				}else if myBot.Id != ""{
+					if myBot.Id == "" {
+						fmt.Println("NO BOT ASSOCIATED WITH THIS RESILIENCE ENTRY : SOMETHING WRONG \n")
+						fmt.Println(strings.ReplaceAll(resilienceItem.Id, myRequestItem.Id, "") + "\n")
 
-					wg.Add(1)
+					} else if myBot.Id != "" {
 
-					go publishImplementation(myBot, sensor, &wg)
+						wg.Add(1)
+
+						go publishImplementation(myBot, sensor, &wg)
+					}
+
 				}
 
+				//awaits for all subroutines to end with an ack
+				wg.Wait()
 			}
-
-			//awaits for all subroutines to end with an ack
-			wg.Wait()
 
 			removePubRequest(sensor.Id, sensor.Message)
 
@@ -404,10 +327,9 @@ func checkResilience() {
 	mainWg.Wait()
 }
 
-
 func findBotbyId(id string) Bot {
 
-	for _,bot := range bots {
+	for _, bot := range bots {
 
 		if bot.Id == id {
 
@@ -419,43 +341,25 @@ func findBotbyId(id string) Bot {
 	return emptyBot
 }
 
-
 //unsubscribes bot with a given Id from current topic
 func unsubscribeBot(w http.ResponseWriter, r *http.Request) {
 
-	/* Versione roberto, TODO TESTARE
+	//Versione roberto, TODO TESTARE
 	var newBot Bot
 	json.NewDecoder(r.Body).Decode(&newBot)
 
-	// chek errore!
 	Unsubscribe(newBot)
+	for k, bot := range bots {
+
+		if bot.Id == newBot.Id {
+
+			bots = append(bots[:k], bots[k+1:]...)
+		}
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	// send back some ack
 	json.NewEncoder(w).Encode(newBot)
-	*/
-
-	/*var id string
-	var check bool
-
-	json.NewDecoder(r.Body).Decode(&id)
-	fmt.Println("id unsub: ", id)
-
-	var newBot Bot
-	newBot, _ = GetDBBot(id)
-	if newBot.Id != id {
-		fmt.Println("--- Error: wrong bot")
-	}
-
-	check, _ = removeTopic(id)
-	if check == false {
-		fmt.Println("--- Error: topic was not removed")
-	} else {
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(newBot)
-
-	}*/
 }
 
 //spawna un sensore randomico o un numero randomico di sensori?

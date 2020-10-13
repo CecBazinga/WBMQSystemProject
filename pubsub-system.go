@@ -15,6 +15,12 @@ type key struct {
 	Sector string
 }
 
+type keyWithId struct {
+	Topic  string
+	Sector string
+	Id     string
+}
+
 type DataEvent struct {
 	Data            interface{} // --> can be any value
 	Topic           string
@@ -26,7 +32,7 @@ type BotSlice []Bot
 
 // Broker stores the information about subscribers interested for // a particular topic
 type Broker struct {
-	subscribersCtx map[key]BotSlice
+	subscribersCtx map[interface{}]BotSlice
 	subscribers    map[string]BotSlice
 	rm             sync.RWMutex // mutex protect broker against concurrent access from read and write
 
@@ -39,34 +45,52 @@ type subResponse struct {
 	Message string `json:"message"`
 }
 
-// TODO Unsubscribe method!
-func Unsubscribe(bot Bot) {
-	// TODO TESTARE
+func Unsubscribe(myBot Bot) {
+	bot := myBot
+	eb.rm.Lock()
 	if contextLock == true {
-		var internalKey = key{
+		var internalKey = keyWithId{
 			Topic:  bot.Topic,
 			Sector: bot.CurrentSector,
+			Id:     bot.Id,
 		}
 		// trovo l'indice nella slice
-		for k, v := range eb.subscribersCtx[internalKey] {
-			if bot == v {
-				// lo rimuovo
-				if prev, found := eb.subscribersCtx[internalKey]; found {
-					eb.subscribersCtx[internalKey] = append(prev[:k], prev[k+1:]...)
-				}
-			}
-		}
+		fmt.Println("LEN prima unsub: -----------------------------")
+		fmt.Println(len(eb.subscribersCtx[internalKey]))
+		fmt.Println(eb.subscribersCtx[internalKey])
+		fmt.Println("----------------------------------------------")
+		//for v := range eb.subscribersCtx[internalKey] {
+		//PROBLEMA : come levo solo il bot e non tutti?
+		//delete(eb.subscribersCtx,internalKey)
+		//if bot == v {
+		// lo rimuovo
+		//eb.subscribersCtx[internalKey] = append(eb.subscribersCtx[internalKey][:k], eb.subscribersCtx[internalKey][k+1:]...)
+		delete(eb.subscribersCtx, internalKey)
+		//break
+		//}
+		//}
+		fmt.Println("LEN dopo unsub: -----------------------------")
+		fmt.Println(len(eb.subscribersCtx[internalKey]))
+		fmt.Println(eb.subscribersCtx[internalKey])
+		fmt.Println("---------------------------------------------")
 	} else {
 		// trovo l'indice nella slice
+		fmt.Println("LEN prima:")
+		fmt.Println(len(eb.subscribers))
 		for k, v := range eb.subscribers[bot.Topic] {
 			if bot == v {
 				// lo rimuovo
 				if prev, found := eb.subscribers[bot.Topic]; found {
 					eb.subscribers[bot.Topic] = append(prev[:k], prev[k+1:]...)
+					break
 				}
 			}
 		}
+		fmt.Println("LEN dopo:")
+		fmt.Println(len(eb.subscribers))
 	}
+	eb.rm.Unlock()
+	removeBot(bot.Id)
 }
 
 func (eb *Broker) Subscribe(bot Bot) {
@@ -79,11 +103,21 @@ func (eb *Broker) Subscribe(bot Bot) {
 			Sector: bot.CurrentSector,
 		}
 
+		fmt.Println("LEN prima di sub: -----------------------------")
+		fmt.Println(len(eb.subscribersCtx[internalKey]))
+		fmt.Println(eb.subscribersCtx[internalKey])
+		fmt.Println("-----------------------------------------------")
+
 		if prev, found := eb.subscribersCtx[internalKey]; found {
 			eb.subscribersCtx[internalKey] = append(prev, bot)
 		} else {
 			eb.subscribersCtx[internalKey] = append([]Bot{}, bot)
 		}
+
+		fmt.Println("LEN dopo di sub: -----------------------------")
+		fmt.Println(len(eb.subscribersCtx[internalKey]))
+		fmt.Println(eb.subscribersCtx[internalKey])
+		fmt.Println("-----------------------------------------------")
 
 	} else {
 		// Without context
@@ -94,7 +128,6 @@ func (eb *Broker) Subscribe(bot Bot) {
 		}
 
 	}
-
 	eb.rm.Unlock()
 }
 
@@ -108,13 +141,23 @@ func (eb *Broker) Publish(sensor Sensor) {
 			Topic:  localSensor.Type,
 			Sector: localSensor.CurrentSector,
 		}
-		if bots, found := eb.subscribersCtx[internalKey]; found {
+
+		fmt.Println("LEN prima di pub: -----------------------------")
+		fmt.Println(len(eb.subscribersCtx[internalKey]))
+		fmt.Println(eb.subscribersCtx[internalKey])
+		fmt.Println("-----------------------------------------------")
+
+		if notThebots, found := eb.subscribersCtx[internalKey]; found {
 			fmt.Println("Il lock funziona bene! \n")
 			// this is done because the slices refer to same array even though they are passed by value
 			// thus we are creating a new slice with our elements thus preserve locking correctly.
-			myBots := append(BotSlice{}, bots...)
+			myBots := append(BotSlice{}, notThebots...)
 			eb.rm.RUnlock()
 
+			fmt.Println("LEN dopo notthebots di pub: -----------------------------")
+			fmt.Println(len(eb.subscribersCtx[internalKey]))
+			fmt.Println(eb.subscribersCtx[internalKey])
+			fmt.Println("---------------------------------------------------------")
 			//main subroutine spaws a subroutine for every bot who needs to be notified and awaits
 			//for every subroutine to receive its own ack
 
@@ -127,6 +170,11 @@ func (eb *Broker) Publish(sensor Sensor) {
 
 				myBot := bot
 				wg.Add(1)
+
+				fmt.Println("LEN prima di pubimplementation: -----------------------------")
+				fmt.Println(len(eb.subscribersCtx[internalKey]))
+				fmt.Println(eb.subscribersCtx[internalKey])
+				fmt.Println("-------------------------------------------------------------")
 
 				go publishImplementation(myBot, localSensor, &wg)
 
@@ -142,11 +190,11 @@ func (eb *Broker) Publish(sensor Sensor) {
 
 	} else {
 
-		if bots, found := eb.subscribers[localSensor.Type]; found {
+		if notThebots, found := eb.subscribers[localSensor.Type]; found {
 			fmt.Println("Il lock funziona bene! \n")
 			// this is done because the slices refer to same array even though they are passed by value
 			// thus we are creating a new slice with our elements thus preserve locking correctly.
-			myBots := append(BotSlice{}, bots...)
+			myBots := append(BotSlice{}, notThebots...)
 			eb.rm.RUnlock()
 
 			//main subroutine spaws a subroutine for every bot who needs to be notified and awaits
@@ -193,24 +241,25 @@ func publishImplementation(bot Bot, sensor Sensor, wg *sync.WaitGroup) {
 	mySensor := sensor
 	myMessage := mySensor.Message
 
-
 	//blocking call : go function awaits for response to its http request
 	response := newRequest(myNewBot, myMessage, mySensor)
 
 	var dataReceived subResponse
 	err := json.NewDecoder(response.Body).Decode(&dataReceived)
 
+	fmt.Println("LEN dentro di pubimplementation: -----------------------------")
+	fmt.Println(len(eb.subscribersCtx))
+	fmt.Println(eb.subscribersCtx)
+	fmt.Println("-----------------------------------------------")
 
 	if err == nil {
 
 		// scenario in which bot responded with ack
 		fmt.Println("Ack received successfully from bot :  " + dataReceived.BotId + "\n" + "with\n" +
 			"Message:" + dataReceived.Message + "\n")
-
 		removeResilienceEntry(dataReceived.BotId, dataReceived.Message, mySensor.Id)
 
-
-	} else if err,ok := err.(net.Error); ok && err.Timeout() {
+	} else if err, ok := err.(net.Error); ok && err.Timeout() {
 
 		fmt.Println("HOOKIN FOR BOOTY GOT TIMEOUT !!!")
 
@@ -221,27 +270,27 @@ func publishImplementation(bot Bot, sensor Sensor, wg *sync.WaitGroup) {
 
 			// got the right ack message so i cans top retransmitting
 			if newErr == nil && dataReceived.BotId == myNewBot.Id && dataReceived.Message == myMessage {
+
 				fmt.Println("HOOKIN FOR BOOTY GOT RIGHT ACK MESSAGE, GONNA STOP RETRANSMISSION !!!")
+				// qua non serve fare la removeresilianceentry?
 				break
 
-			}else if newErr , ok := newErr.(net.Error); ok && newErr.Timeout(){
+			} else if newErr, ok := newErr.(net.Error); ok && newErr.Timeout() {
 				fmt.Println("GOT TIMEOUTED AGAIN SO I WILL RETRY ONE TIME MORE !!!")
 				continue
 
-			}else{
+			} else {
 				fmt.Println("GOT BOT ERROR NOT RESPONDING SO I WILL RETRY LATER ON !!!")
-				time.Sleep(20*time.Second)
+				time.Sleep(20 * time.Second)
 				continue
 			}
 		}
 
-	}else {
+	} else {
 		//got connection error
 		fmt.Println(err)
 
 	}
-
-
 	wg.Done()
 }
 
@@ -254,6 +303,7 @@ func newRequest(bot Bot, message string, sensor Sensor) *http.Response {
 		"bot_cs":    bot.CurrentSector,
 		"sensor":    sensor.Id,
 		"sensor_cs": sensor.CurrentSector,
+		"topic":     bot.Topic,
 	})
 
 	if err != nil {
@@ -273,7 +323,7 @@ func newRequest(bot Bot, message string, sensor Sensor) *http.Response {
 // init broker
 var eb = &Broker{
 	subscribers:    map[string]BotSlice{},
-	subscribersCtx: map[key]BotSlice{},
+	subscribersCtx: map[interface{}]BotSlice{},
 	sensorsRequest: []Sensor{},
 }
 
