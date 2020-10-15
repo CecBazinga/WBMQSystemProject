@@ -55,7 +55,6 @@ type resilienceEntry struct {
 
 var bots []Bot
 var topics []string
-var ch []chan DataEvent
 var contextLock = false
 var dynamoDBSession *dynamodb.DynamoDB = nil
 var sensorRequest sync.WaitGroup
@@ -252,7 +251,7 @@ func checkResilience() {
 		panic(err)
 	}
 
-	//once i got the system's state before ccrash i can release lock for main to gon on and listen and serve new requests
+	//once i got the system's state before crash i can release lock for main to gon on and listen and serve new requests
 	//while i serve the older ones too
 	resilienceLock.Done()
 
@@ -344,11 +343,10 @@ func findBotbyId(id string) Bot {
 //unsubscribes bot with a given Id from current topic
 func unsubscribeBot(w http.ResponseWriter, r *http.Request) {
 
-	//Versione roberto, TODO TESTARE
 	var newBot Bot
 	json.NewDecoder(r.Body).Decode(&newBot)
 
-	Unsubscribe(newBot)
+	eb.Unsubscribe(newBot)
 	for k, bot := range bots {
 
 		if bot.Id == newBot.Id {
@@ -362,181 +360,4 @@ func unsubscribeBot(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(newBot)
 }
 
-//spawna un sensore randomico o un numero randomico di sensori?
-/*
-func spawnSensorRand(w http.ResponseWriter, r *http.Request) {
-	var num = mux.Vars(r)["num"]
-	totnum, err := strconv.Atoi(num)
-	//json.NewDecoder(r.Body).Decode(&newBot)
-	if err != nil {
-		// there was an error
-		w.WriteHeader(400)
-		w.Write([]byte("ID could not be converted to integer"))
-		return
-	}
-	for i := 0; i < totnum; i++ {
-		var newSensor Sensor
-		newSensor.Id = shortuuid.New()
-		newSensor.CurrentSector = warehouses[rand.Intn(len(warehouses))]
-		newSensor.Type = topics[rand.Intn(len(topics))]
-		sensorsRequest = append(sensorsRequest, newSensor)
-		AddDBSensorRequest(newSensor)
-		go func(sensor Sensor) {
-			eb.Publish(newSensor)
-			//publishTo(sensor)
-		}(newSensor)
-	}
 
-	// make channel
-
-	// what to return? 200 ? dunno
-	//w.Header().Set("Content-Type", "application/json")
-	//json.NewEncoder(w).Encode(newSensor)
-}*/
-
-/*
-func spawnBotRand(w http.ResponseWriter, r *http.Request) {
-	var num = mux.Vars(r)["num"]
-	totnum, err := strconv.Atoi(num)
-	//json.NewDecoder(r.Body).Decode(&newBot)
-	if err != nil {
-		// there was an error
-		w.WriteHeader(400)
-		w.Write([]byte("ID could not be converted to integer"))
-		return
-	}
-	for i := 0; i < totnum; i++ {
-		var newBot Bot
-		newBot.Id = shortuuid.New()
-		newBot.CurrentSector = warehouses[rand.Intn(len(warehouses))]
-		newBot.Topic = topics[rand.Intn(len(topics))]
-		bots = append(bots, newBot)
-		spawned = append(spawned, true)
-		AddDBBot(newBot)
-		chn := make(chan DataEvent, len(sensorsRequest))
-		ch = append(ch, chn)
-		eb.Subscribe(newBot, chn)
-	}
-
-	// make channel
-
-	// what to return? 200 ? dunno
-	//w.Header().Set("Content-Type", "application/json")
-	//json.NewEncoder(w).Encode(newBot)
-}*/
-
-/*
-func unsubRandomBot(w http.ResponseWriter, r *http.Request) {
-
-	fmt.Println("--- STO IN UNSUB RANDOM BOTS!!")
-
-	var num = mux.Vars(r)["num"]
-	totnum, err := strconv.Atoi(num)
-	//json.NewDecoder(r.Body).Decode(&newBot)
-
-	fmt.Println("--- totnum: ", totnum)
-
-	if err != nil {
-		// there was an error
-		w.WriteHeader(400)
-		w.Write([]byte("ID could not be converted to integer"))
-		return
-	}
-
-	for i := 0; i < totnum; i++ {
-
-		randomIndex := rand.Intn(len(sensorsRequest))
-		pickedBot := bots[randomIndex]
-
-		fmt.Println("--- pickedSensor id: ", pickedBot.Id)
-
-		var check bool
-		check, _ = removeTopic(pickedBot.Id)
-		if check == false {
-			fmt.Println("--- Error: not all bot were not unsubscribed")
-		} else {
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(pickedBot.Id)
-		}
-
-	}
-
-}*/
-
-/*
-func killRandomBot(w http.ResponseWriter, r *http.Request) {
-
-	fmt.Println("--- STO IN KILL RANDOM BOTS!!")
-
-	var num = mux.Vars(r)["num"]
-	totnum, err := strconv.Atoi(num)
-	//json.NewDecoder(r.Body).Decode(&newBot)
-
-	fmt.Println("--- totnum: ", totnum)
-
-	if err != nil {
-		// there was an error
-		w.WriteHeader(400)
-		w.Write([]byte("ID could not be converted to integer"))
-		return
-	}
-
-	for i := 0; i < totnum; i++ {
-
-		randomIndex := rand.Intn(len(sensorsRequest))
-		pickedSensor := sensorsRequest[randomIndex]
-
-		fmt.Println("--- pickedBot id: ", pickedSensor.Id)
-
-		var check bool
-		check, _ = removeBot(pickedSensor.Id)
-		if check == false {
-			fmt.Println("--- Error: bot was not killed")
-		} else {
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(pickedSensor.Id)
-		}
-
-	}
-
-}
-
-func killRandomSensor(w http.ResponseWriter, r *http.Request) {
-
-	fmt.Println("--- STO IN KILL RANDOM SENSOR!!")
-
-	var num = mux.Vars(r)["num"]
-	totnum, err := strconv.Atoi(num)
-	//json.NewDecoder(r.Body).Decode(&newBot)
-
-	fmt.Println("--- totnum: ", totnum)
-
-	if err != nil {
-		// there was an error
-		w.WriteHeader(400)
-		w.Write([]byte("ID could not be converted to integer"))
-		return
-	}
-
-	for i := 0; i < totnum; i++ {
-
-		randomIndex := rand.Intn(len(sensorsRequest))
-		pickedSensor := sensorsRequest[randomIndex]
-
-		fmt.Println("--- pickedSensor id: ", pickedSensor.Id)
-
-		var check bool
-		check, _ = removeSensor(pickedSensor.Id)
-		if check == false {
-			fmt.Println("--- Error: sensor was not killed")
-		} else {
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(pickedSensor.Id)
-		}
-
-	}
-
-}
-
-
-*/

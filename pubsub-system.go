@@ -15,24 +15,12 @@ type key struct {
 	Sector string
 }
 
-type keyWithId struct {
-	Topic  string
-	Sector string
-	Id     string
-}
-
-type DataEvent struct {
-	Data            interface{} // --> can be any value
-	Topic           string
-	ResponseChannel chan string
-}
-
 // BotSlice is a slice of Bot
 type BotSlice []Bot
 
 // Broker stores the information about subscribers interested for // a particular topic
 type Broker struct {
-	subscribersCtx map[interface{}]BotSlice
+	subscribersCtx map[key]BotSlice
 	subscribers    map[string]BotSlice
 	rm             sync.RWMutex // mutex protect broker against concurrent access from read and write
 
@@ -45,36 +33,37 @@ type subResponse struct {
 	Message string `json:"message"`
 }
 
-func Unsubscribe(myBot Bot) {
+func (eb *Broker) Unsubscribe(myBot Bot) {
 	bot := myBot
 	eb.rm.Lock()
 	if contextLock == true {
-		var internalKey = keyWithId{
+		var internalKey = key{
 			Topic:  bot.Topic,
 			Sector: bot.CurrentSector,
-			Id:     bot.Id,
 		}
 		// trovo l'indice nella slice
 		fmt.Println("LEN prima unsub: -----------------------------")
+		fmt.Println(len(eb.subscribersCtx))
+		fmt.Println(eb.subscribersCtx)
 		fmt.Println(len(eb.subscribersCtx[internalKey]))
 		fmt.Println(eb.subscribersCtx[internalKey])
 		fmt.Println("----------------------------------------------")
-		//for v := range eb.subscribersCtx[internalKey] {
-		//PROBLEMA : come levo solo il bot e non tutti?
-		//delete(eb.subscribersCtx,internalKey)
-		//if bot == v {
-		// lo rimuovo
-		//eb.subscribersCtx[internalKey] = append(eb.subscribersCtx[internalKey][:k], eb.subscribersCtx[internalKey][k+1:]...)
-		delete(eb.subscribersCtx, internalKey)
-		//break
-		//}
-		//}
+
+		for k, theBot := range eb.subscribersCtx[internalKey] {
+			if theBot.Id == bot.Id {
+				// lo rimuovo
+				eb.subscribersCtx[internalKey] = append(eb.subscribersCtx[internalKey][:k],eb.subscribersCtx[internalKey][k+1:]...)
+				break
+			}
+		}
+
+
 		fmt.Println("LEN dopo unsub: -----------------------------")
 		fmt.Println(len(eb.subscribersCtx[internalKey]))
 		fmt.Println(eb.subscribersCtx[internalKey])
 		fmt.Println("---------------------------------------------")
 	} else {
-		// trovo l'indice nella slice
+		//TODO ricopiare quella con contesto riadattata
 		fmt.Println("LEN prima:")
 		fmt.Println(len(eb.subscribers))
 		for k, v := range eb.subscribers[bot.Topic] {
@@ -323,53 +312,8 @@ func newRequest(bot Bot, message string, sensor Sensor) *http.Response {
 // init broker
 var eb = &Broker{
 	subscribers:    map[string]BotSlice{},
-	subscribersCtx: map[interface{}]BotSlice{},
+	subscribersCtx: map[key]BotSlice{},
 	sensorsRequest: []Sensor{},
 }
 
-/*  MAYBE FUTURE IMPLEMENTATION?
-func swapCtxToStandard() {
-	for _, i := range eb.subscribersCtx {
 
-	}
-}
-
-func swapStandardToNormal() {
-
-}*/
-
-//function that allow sensor to publish data in an infinite loop
-/*func publishTo(sensor Sensor) {
-
-	for {
-		eb.Publish(sensor, strconv.FormatFloat(rand.Float64(), 'E', 1, 64))
-		time.Sleep(time.Duration(rand.Intn(50)) * time.Second)
-
-
-	}
-}*/
-
-/*func printDataEvent(ch string, data DataEvent) {
-	fmt.Printf("Channel: %s; Topic: %s; DataEvent: %v\n", ch, data.Topic, data.Data)
-}*/
-
-/*func main() {
-	ch1 := make(chan DataEvent)
-	ch2 := make(chan DataEvent)
-	ch3 := make(chan DataEvent)
-	eb.Subscribe("topic1", ch1)
-	eb.Subscribe("topic2", ch2)
-	eb.Subscribe("topic2", ch3)
-	go publishTo("topic1", "Hi topic 1")
-	go publishTo("topic2", "Welcome to topic 2")
-	for {
-		select { // select will get data from the quickest channel
-		case d := <-ch1:
-			go printDataEvent("ch1", d)
-		case d := <-ch2:
-			go printDataEvent("ch2", d)
-		case d := <-ch3:
-			go printDataEvent("ch3", d)
-		}
-	}
-}*/
