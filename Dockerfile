@@ -14,4 +14,4 @@ RUN apk update && \
     go get github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute
 RUN GOOS=linux GOARCH=amd64 go build -o wbmq
 EXPOSE 5000
-CMD ["./wbmq ctx"]
+CMD ["./wbmq"]
