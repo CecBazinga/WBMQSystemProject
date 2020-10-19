@@ -14,14 +14,6 @@ import (
 	"time"
 )
 
-// Result
-type Result struct {
-	Id     string      `json:"id"`
-	Data   interface{} `json:"data"`
-	Topic  string      `json:"topic"`
-	Sector string      `json:"sector"`
-}
-
 // Ping
 type Ping struct {
 	CtxStatus string    `json:"status"`
@@ -199,8 +191,6 @@ func spawnSensor(w http.ResponseWriter, r *http.Request) {
 		fmt.Println("New message from a sensor alredy in the system with id : " + newSensor.Id)
 	} else {
 		newSensor.Id = shortuuid.New()
-		//sensorsRequest = append(sensorsRequest, newSensor)
-		//AddDBSensorRequest(newSensor)
 	}
 
 	var msg = newSensor.Message
@@ -229,7 +219,10 @@ func spawnSensor(w http.ResponseWriter, r *http.Request) {
 func spawnBot(w http.ResponseWriter, r *http.Request) {
 	var newBot Bot
 	json.NewDecoder(r.Body).Decode(&newBot)
-	newBot.Id = shortuuid.New()
+	if newBot.Id == "" {
+		newBot.Id = shortuuid.New()
+	}
+
 	bots = append(bots, newBot)
 
 	AddDBBot(newBot)
@@ -355,9 +348,12 @@ func unsubscribeBot(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	var newBotAsResponse Bot
+	newBotAsResponse.Topic = "null"
+	newBotAsResponse.Id = "null"
+	newBotAsResponse.CurrentSector = "null"
+	newBotAsResponse.IpAddress = "null"
 	w.Header().Set("Content-Type", "application/json")
 	// send back some ack
-	json.NewEncoder(w).Encode(newBot)
+	json.NewEncoder(w).Encode(newBotAsResponse)
 }
-
-

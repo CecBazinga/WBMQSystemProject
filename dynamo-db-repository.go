@@ -7,7 +7,6 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
-	"github.com/aws/aws-sdk-go/service/dynamodb/expression"
 	"os"
 )
 
@@ -167,29 +166,6 @@ func writeBotIdsAndMessage(botsArray []Bot, sensor Sensor) {
 	}
 }
 
-//returns the sensor list in db if any
-func GetDBSensors() ([]Sensor, error) {
-	client := initDBClient()
-	params := &dynamodb.ScanInput{
-		TableName: aws.String("sensorsRequest"),
-	}
-	result, err := client.Scan(params)
-	if err != nil {
-		return nil, err
-	}
-
-	var sensorslist = []Sensor{}
-	for _, i := range result.Items {
-		sensor := Sensor{}
-		err = dynamodbattribute.UnmarshalMap(i, &sensor)
-		if err != nil {
-			return nil, err
-		}
-		sensorslist = append(sensorslist, sensor)
-	}
-	return sensorslist, nil
-}
-
 //removes the entry (botId,message) from resilience table if bot identified by botId received correctly message
 //and answered with an ack to te sending goroutine
 func removeResilienceEntry(botId string, message string, sensor string) {
@@ -284,7 +260,7 @@ func ExistingTables() (int, error) {
 
 }
 
-func removeBot(id string) (bool, error) {
+func removeBot(id string) error {
 
 	client := initDBClient()
 	fmt.Println("id bot: ", id)
@@ -301,103 +277,11 @@ func removeBot(id string) (bool, error) {
 	_, err = client.DeleteItem(input)
 	if err != nil {
 		fmt.Println(err.Error())
-		return false, err
+		return err
 	}
 
 	fmt.Println("---- Bot " + id + " was successfully removed ")
-	return true, nil
-}
-
-// remove topic from bot
-func removeTopic(id string) (bool, error) {
-
-	client := initDBClient()
-	expr := expression.Remove(
-		expression.Name("topic"),
-	)
-
-	update, err := expression.NewBuilder().
-		WithUpdate(expr).
-		Build()
-	if err != nil {
-		return false, fmt.Errorf("failed to build update expression: %v")
-	}
-
-	input := &dynamodb.UpdateItemInput{
-		TableName:                 aws.String("bots"),
-		ExpressionAttributeNames:  update.Names(),
-		ExpressionAttributeValues: update.Values(),
-		Key: map[string]*dynamodb.AttributeValue{
-			"id": {
-				S: &id,
-			},
-		},
-		UpdateExpression: update.Update(),
-	}
-	fmt.Println(input.String())
-	_, err = client.UpdateItem(input)
-
-	if err != nil {
-		fmt.Println(err.Error())
-		return false, nil
-	}
-
-	fmt.Println("Successfully unsubscribed " + id)
-	return true, nil
-}
-
-func removeSensor(id string) (bool, error) {
-
-	client := initDBClient()
-
-	//client := initDBClient()
-	//av, err := dynamodbattribute.MarshalMap(sensor)
-	input := &dynamodb.DeleteItemInput{
-		//Item:      av,
-		TableName: aws.String("sensorsRequest"),
-		Key: map[string]*dynamodb.AttributeValue{
-			"id": {
-				S: &id,
-			},
-		},
-	}
-	var err error
-	_, err = client.DeleteItem(input)
-	if err != nil {
-		fmt.Println(err.Error())
-		return false, nil
-	}
-
-	fmt.Println("---- Sensor " + id + " was successfully removed ")
-	return true, nil
-}
-
-func GetDBBot(id string) (Bot, error) {
-	var myBot Bot
-
-	client := initDBClient()
-	params := &dynamodb.ScanInput{
-		TableName: aws.String("bots"),
-	}
-	result, err := client.Scan(params)
-	if err != nil {
-		return myBot, err
-	}
-
-	for _, i := range result.Items {
-		bot := Bot{}
-		err = dynamodbattribute.UnmarshalMap(i, &bot)
-
-		if bot.Id == id {
-			myBot = bot
-		}
-
-		if err != nil {
-			return myBot, nil
-		}
-
-	}
-	return myBot, nil
+	return nil
 }
 
 //creates new Bots and Sensors tables

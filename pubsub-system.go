@@ -41,45 +41,33 @@ func (eb *Broker) Unsubscribe(myBot Bot) {
 			Topic:  bot.Topic,
 			Sector: bot.CurrentSector,
 		}
-		// trovo l'indice nella slice
-		fmt.Println("LEN prima unsub: -----------------------------")
-		fmt.Println(len(eb.subscribersCtx))
-		fmt.Println(eb.subscribersCtx)
-		fmt.Println(len(eb.subscribersCtx[internalKey]))
-		fmt.Println(eb.subscribersCtx[internalKey])
-		fmt.Println("----------------------------------------------")
-
+		// Trovo indice del bot
 		for k, theBot := range eb.subscribersCtx[internalKey] {
 			if theBot.Id == bot.Id {
 				// lo rimuovo
-				eb.subscribersCtx[internalKey] = append(eb.subscribersCtx[internalKey][:k],eb.subscribersCtx[internalKey][k+1:]...)
+				eb.subscribersCtx[internalKey] = append(eb.subscribersCtx[internalKey][:k], eb.subscribersCtx[internalKey][k+1:]...)
 				break
 			}
 		}
 
-
-		fmt.Println("LEN dopo unsub: -----------------------------")
-		fmt.Println(len(eb.subscribersCtx[internalKey]))
-		fmt.Println(eb.subscribersCtx[internalKey])
-		fmt.Println("---------------------------------------------")
 	} else {
-		//TODO ricopiare quella con contesto riadattata
-		fmt.Println("LEN prima:")
-		fmt.Println(len(eb.subscribers))
-		for k, v := range eb.subscribers[bot.Topic] {
-			if bot == v {
+		// Trovo indice del bot
+		for k, theBot := range eb.subscribers[bot.Topic] {
+			if theBot.Id == bot.Id {
 				// lo rimuovo
-				if prev, found := eb.subscribers[bot.Topic]; found {
-					eb.subscribers[bot.Topic] = append(prev[:k], prev[k+1:]...)
-					break
-				}
+				eb.subscribers[bot.Topic] = append(eb.subscribers[bot.Topic][:k], eb.subscribers[bot.Topic][k+1:]...)
+				break
 			}
 		}
-		fmt.Println("LEN dopo:")
-		fmt.Println(len(eb.subscribers))
 	}
 	eb.rm.Unlock()
-	removeBot(bot.Id)
+
+	err := removeBot(bot.Id)
+	if err != nil {
+		fmt.Println("Got error in removing bot")
+	} else {
+		fmt.Println("Bot removed successfully!")
+	}
 }
 
 func (eb *Broker) Subscribe(bot Bot) {
@@ -92,21 +80,11 @@ func (eb *Broker) Subscribe(bot Bot) {
 			Sector: bot.CurrentSector,
 		}
 
-		fmt.Println("LEN prima di sub: -----------------------------")
-		fmt.Println(len(eb.subscribersCtx[internalKey]))
-		fmt.Println(eb.subscribersCtx[internalKey])
-		fmt.Println("-----------------------------------------------")
-
 		if prev, found := eb.subscribersCtx[internalKey]; found {
 			eb.subscribersCtx[internalKey] = append(prev, bot)
 		} else {
 			eb.subscribersCtx[internalKey] = append([]Bot{}, bot)
 		}
-
-		fmt.Println("LEN dopo di sub: -----------------------------")
-		fmt.Println(len(eb.subscribersCtx[internalKey]))
-		fmt.Println(eb.subscribersCtx[internalKey])
-		fmt.Println("-----------------------------------------------")
 
 	} else {
 		// Without context
@@ -131,22 +109,13 @@ func (eb *Broker) Publish(sensor Sensor) {
 			Sector: localSensor.CurrentSector,
 		}
 
-		fmt.Println("LEN prima di pub: -----------------------------")
-		fmt.Println(len(eb.subscribersCtx[internalKey]))
-		fmt.Println(eb.subscribersCtx[internalKey])
-		fmt.Println("-----------------------------------------------")
-
 		if notThebots, found := eb.subscribersCtx[internalKey]; found {
-			fmt.Println("Il lock funziona bene! \n")
+
 			// this is done because the slices refer to same array even though they are passed by value
 			// thus we are creating a new slice with our elements thus preserve locking correctly.
 			myBots := append(BotSlice{}, notThebots...)
 			eb.rm.RUnlock()
 
-			fmt.Println("LEN dopo notthebots di pub: -----------------------------")
-			fmt.Println(len(eb.subscribersCtx[internalKey]))
-			fmt.Println(eb.subscribersCtx[internalKey])
-			fmt.Println("---------------------------------------------------------")
 			//main subroutine spaws a subroutine for every bot who needs to be notified and awaits
 			//for every subroutine to receive its own ack
 
@@ -159,11 +128,6 @@ func (eb *Broker) Publish(sensor Sensor) {
 
 				myBot := bot
 				wg.Add(1)
-
-				fmt.Println("LEN prima di pubimplementation: -----------------------------")
-				fmt.Println(len(eb.subscribersCtx[internalKey]))
-				fmt.Println(eb.subscribersCtx[internalKey])
-				fmt.Println("-------------------------------------------------------------")
 
 				go publishImplementation(myBot, localSensor, &wg)
 
@@ -235,11 +199,6 @@ func publishImplementation(bot Bot, sensor Sensor, wg *sync.WaitGroup) {
 
 	var dataReceived subResponse
 	err := json.NewDecoder(response.Body).Decode(&dataReceived)
-
-	fmt.Println("LEN dentro di pubimplementation: -----------------------------")
-	fmt.Println(len(eb.subscribersCtx))
-	fmt.Println(eb.subscribersCtx)
-	fmt.Println("-----------------------------------------------")
 
 	if err == nil {
 
@@ -315,5 +274,3 @@ var eb = &Broker{
 	subscribersCtx: map[key]BotSlice{},
 	sensorsRequest: []Sensor{},
 }
-
-
