@@ -3,11 +3,9 @@ package main
 import (
 	"fmt"
 	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
-	"os"
 )
 
 func initDBClient() *dynamodb.DynamoDB {
@@ -34,7 +32,7 @@ func AddDBBot(bot Bot) {
 	}
 	_, err = client.PutItem(input)
 	if err != nil {
-		fmt.Println(err.Error())
+		panic(err.Error())
 	}
 }
 
@@ -45,11 +43,8 @@ func GetDBBots() ([]Bot, error) {
 		TableName: aws.String("bots"),
 	}
 
-	fmt.Println("Params are", params)
 	result, err := client.Scan(params)
 	if err != nil {
-		fmt.Println("Step 1")
-		fmt.Println(err)
 		return nil, err
 	}
 
@@ -58,8 +53,6 @@ func GetDBBots() ([]Bot, error) {
 		bot := Bot{}
 		err = dynamodbattribute.UnmarshalMap(i, &bot)
 		if err != nil {
-			fmt.Println("Step 2")
-			fmt.Println(err)
 			return nil, err
 		}
 		botslist = append(botslist, bot)
@@ -74,10 +67,8 @@ func GetResilienceEntries() ([]resilienceEntry, error) {
 		TableName: aws.String("resilience"),
 	}
 
-	fmt.Println("Params are", params)
 	result, err := client.Scan(params)
 	if err != nil {
-		fmt.Println(err)
 		return nil, err
 	}
 
@@ -86,7 +77,6 @@ func GetResilienceEntries() ([]resilienceEntry, error) {
 		entry := resilienceEntry{}
 		err = dynamodbattribute.UnmarshalMap(i, &entry)
 		if err != nil {
-			fmt.Println(err)
 			return nil, err
 		}
 		resilienceList = append(resilienceList, entry)
@@ -101,10 +91,8 @@ func GetRequestEntries() ([]Sensor, error) {
 		TableName: aws.String("sensorsRequest"),
 	}
 
-	fmt.Println("Params are", params)
 	result, err := client.Scan(params)
 	if err != nil {
-		fmt.Println(err)
 		return nil, err
 	}
 
@@ -113,7 +101,6 @@ func GetRequestEntries() ([]Sensor, error) {
 		entry := Sensor{}
 		err = dynamodbattribute.UnmarshalMap(i, &entry)
 		if err != nil {
-			fmt.Println(err)
 			return nil, err
 		}
 		requestList = append(requestList, entry)
@@ -132,7 +119,7 @@ func AddDBSensorRequest(sensor Sensor) {
 	}
 	_, err = client.PutItem(input)
 	if err != nil {
-		fmt.Println(err.Error())
+		panic(err.Error())
 	}
 }
 
@@ -141,14 +128,9 @@ func writeBotIdsAndMessage(botsArray []Bot, sensor Sensor) {
 
 	client := initDBClient()
 
-	fmt.Println("BOT IDS ARRAY SIZE IS : \n")
-	fmt.Println(len(botsArray))
-	fmt.Println("MESSAGE IS : \n")
-	fmt.Println(sensor.Message)
-
 	for _, bot := range botsArray {
 
-		fmt.Println("Id number : " + bot.Id)
+		//fmt.Println("Id number : " + bot.Id)
 		var item resilienceEntry
 		item.Id = bot.Id + sensor.Id
 		item.Message = sensor.Message
@@ -160,8 +142,7 @@ func writeBotIdsAndMessage(botsArray []Bot, sensor Sensor) {
 		}
 		_, err = client.PutItem(input)
 		if err != nil {
-			fmt.Println("THERE WE GO !!!")
-			fmt.Println(err.Error())
+			panic(err.Error())
 		}
 	}
 }
@@ -173,7 +154,6 @@ func removeResilienceEntry(botId string, message string, sensor string) {
 	client := initDBClient()
 	id := botId + sensor
 	thisMessage := message
-	thisSensor := sensor
 
 	params := &dynamodb.DeleteItemInput{
 		Key: map[string]*dynamodb.AttributeValue{
@@ -189,14 +169,9 @@ func removeResilienceEntry(botId string, message string, sensor string) {
 
 	_, err := client.DeleteItem(params)
 	if err != nil {
-		fmt.Println("Got error calling DeleteItem on bot : " + botId + " and with message : " + message +
-			"from sensor : " + thisSensor + "\n")
-		fmt.Println(err.Error())
 
-	} else {
+		panic(err.Error())
 
-		fmt.Println("Deleted resielience entry : bot = " + botId + "  and message = " + message +
-			"from sensor : " + thisSensor + "\n")
 	}
 }
 
@@ -222,8 +197,8 @@ func removePubRequest(sensorId string, message string) {
 
 	_, err := client.DeleteItem(params)
 	if err != nil {
-		fmt.Println("Got error calling DeleteItem on PubRequest on sensor : " + id + " and with message : " + thisMessage + "\n")
-		fmt.Println(err.Error())
+
+		panic(err.Error())
 
 	} else {
 		fmt.Println("Deleted sensorsRequest entry : sensor  = " + id + "  and message = " + thisMessage + "\n")
@@ -241,19 +216,9 @@ func ExistingTables() (int, error) {
 	// Get the list of tables
 	result, err := client.ListTables(input)
 	if err != nil {
-		if aerr, ok := err.(awserr.Error); ok {
-			switch aerr.Code() {
-			case dynamodb.ErrCodeInternalServerError:
-				fmt.Println(dynamodb.ErrCodeInternalServerError, aerr.Error())
-			default:
-				fmt.Println(aerr.Error())
-			}
-		} else {
-			// Print the error, cast err to awserr.Error to get the Code and
-			// Message from an error.
-			fmt.Println(err.Error())
-		}
+
 		return -1, err
+
 	}
 
 	return len(result.TableNames), nil
@@ -263,7 +228,6 @@ func ExistingTables() (int, error) {
 func removeBot(id string) error {
 
 	client := initDBClient()
-	fmt.Println("id bot: ", id)
 
 	input := &dynamodb.DeleteItemInput{
 		TableName: aws.String("bots"),
@@ -276,7 +240,6 @@ func removeBot(id string) error {
 	var err error
 	_, err = client.DeleteItem(input)
 	if err != nil {
-		fmt.Println(err.Error())
 		return err
 	}
 
@@ -315,9 +278,7 @@ func createTables() {
 
 	_, err := client.CreateTable(inputBots)
 	if err != nil {
-		fmt.Println("Got error calling CreateTable:")
-		fmt.Println(err.Error())
-		os.Exit(1)
+		panic(err.Error())
 	}
 
 	fmt.Println("Created the table", tableNameBots)
@@ -356,9 +317,9 @@ func createTables() {
 
 	_, err2 := client.CreateTable(inputSensors)
 	if err2 != nil {
-		fmt.Println("Got error calling CreateTable:")
-		fmt.Println(err2.Error())
-		os.Exit(1)
+
+		panic(err2.Error())
+
 	}
 
 	fmt.Println("Created the table", tableSensorsRequest)
@@ -397,9 +358,9 @@ func createTables() {
 
 	_, err3 := client.CreateTable(inputResilience)
 	if err3 != nil {
-		fmt.Println("Got error calling CreateTable:")
-		fmt.Println(err3.Error())
-		os.Exit(1)
+
+		panic(err3.Error())
+
 	}
 
 	fmt.Println("Created the table", tableNameResilience)

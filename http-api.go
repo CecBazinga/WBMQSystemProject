@@ -100,15 +100,9 @@ func main() {
 		if len(eb.sensorsRequest) > 0 {
 
 			request := eb.sensorsRequest[0]
-			fmt.Println("THE MESSAGE IS : " + request.Message + "\n")
 			sensorRequest.Add(1)
 
 			go func(request Sensor) {
-
-				fmt.Println("LEN inside main go func: -----------------------------")
-				fmt.Println(len(eb.subscribersCtx))
-				fmt.Println(eb.subscribersCtx)
-				fmt.Println("------------------------------------------------------")
 
 				myRequest := request
 				sensorRequest.Done()
@@ -144,7 +138,7 @@ func checkCli() {
 		if arg == "ctx" {
 			contextLock = true
 		} else {
-			fmt.Println("Wrong argument inserted!")
+			panic("Wrong argument inserted!")
 		}
 	}
 }
@@ -187,9 +181,7 @@ func spawnSensor(w http.ResponseWriter, r *http.Request) {
 	json.NewDecoder(r.Body).Decode(&newSensor)
 
 	//check if sensor already in system
-	if newSensor.Id != "" {
-		fmt.Println("New message from a sensor alredy in the system with id : " + newSensor.Id)
-	} else {
+	if newSensor.Id == "" {
 		newSensor.Id = shortuuid.New()
 	}
 
@@ -200,11 +192,12 @@ func spawnSensor(w http.ResponseWriter, r *http.Request) {
 	//if PiggyBagRetransmission is true it means that message ahd already been transmitted so i do no op but ack
 	if newSensor.Pbrtx {
 
-		fmt.Println("FACCIO FINTA DI ESEGUIRE IL SERVIZIO !")
+		//TODO funzione ricerca sensor request if found nothing, else eseguo servizio
 
 	} else if !newSensor.Pbrtx {
 
 		AddDBSensorRequest(newSensor)
+		//TODO campo check sens request settato a true se tutte le res entries scritte su db
 		eb.lockQueue.Lock()
 		eb.sensorsRequest = append(eb.sensorsRequest, newSensor)
 		eb.lockQueue.Unlock()
@@ -248,12 +241,6 @@ func checkResilience() {
 	//while i serve the older ones too
 	resilienceLock.Done()
 
-	fmt.Println("RESILIENCE CHECK SIZE IS : \n")
-	fmt.Println(len(resilience))
-
-	fmt.Println("REQUEST CHECK SIZE IS : \n")
-	fmt.Println(len(requestSlice))
-
 	var mainWg sync.WaitGroup
 
 	//for every bot there is a subroutine which sends the message to it and awaits for its ack
@@ -292,8 +279,8 @@ func checkResilience() {
 					myBot := findBotbyId(strings.ReplaceAll(resilienceItem.Id, myRequestItem.Id, ""))
 
 					if myBot.Id == "" {
-						fmt.Println("NO BOT ASSOCIATED WITH THIS RESILIENCE ENTRY : SOMETHING WRONG \n")
-						fmt.Println(strings.ReplaceAll(resilienceItem.Id, myRequestItem.Id, "") + "\n")
+
+						panic("NO BOT ASSOCIATED WITH THIS RESILIENCE ENTRY : SOMETHING WRONG ")
 
 					} else if myBot.Id != "" {
 

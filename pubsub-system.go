@@ -64,9 +64,7 @@ func (eb *Broker) Unsubscribe(myBot Bot) {
 
 	err := removeBot(bot.Id)
 	if err != nil {
-		fmt.Println("Got error in removing bot")
-	} else {
-		fmt.Println("Bot removed successfully!")
+		panic("Got error in removing bot")
 	}
 }
 
@@ -121,7 +119,6 @@ func (eb *Broker) Publish(sensor Sensor) {
 
 			writeBotIdsAndMessage(myBots, localSensor)
 
-			fmt.Println("RESILIENCE TABLE HAS BEEN FILLED FOR SENSOR : ! " + localSensor.Id + "\n")
 			var wg sync.WaitGroup
 			//for every bot there is a subroutine which sends the message to the bot and awaits for its ack
 			for _, bot := range myBots {
@@ -144,7 +141,7 @@ func (eb *Broker) Publish(sensor Sensor) {
 	} else {
 
 		if notThebots, found := eb.subscribers[localSensor.Type]; found {
-			fmt.Println("Il lock funziona bene! \n")
+
 			// this is done because the slices refer to same array even though they are passed by value
 			// thus we are creating a new slice with our elements thus preserve locking correctly.
 			myBots := append(BotSlice{}, notThebots...)
@@ -156,8 +153,6 @@ func (eb *Broker) Publish(sensor Sensor) {
 			var wg sync.WaitGroup
 
 			writeBotIdsAndMessage(myBots, localSensor)
-
-			fmt.Println("RESILIENCE TABLE HAS BEEN FILLED FOR SENSOR : ! " + localSensor.Id + "\n")
 
 			//for every bot there is a subroutine which sends the message to the bot and awaits for its ack
 			for _, bot := range myBots {
@@ -203,13 +198,9 @@ func publishImplementation(bot Bot, sensor Sensor, wg *sync.WaitGroup) {
 	if err == nil {
 
 		// scenario in which bot responded with ack
-		fmt.Println("Ack received successfully from bot :  " + dataReceived.BotId + "\n" + "with\n" +
-			"Message:" + dataReceived.Message + "\n")
 		removeResilienceEntry(dataReceived.BotId, dataReceived.Message, mySensor.Id)
 
 	} else if err, ok := err.(net.Error); ok && err.Timeout() {
-
-		fmt.Println("HOOKIN FOR BOOTY GOT TIMEOUT !!!")
 
 		for {
 
@@ -219,16 +210,13 @@ func publishImplementation(bot Bot, sensor Sensor, wg *sync.WaitGroup) {
 			// got the right ack message so i cans top retransmitting
 			if newErr == nil && dataReceived.BotId == myNewBot.Id && dataReceived.Message == myMessage {
 
-				fmt.Println("HOOKIN FOR BOOTY GOT RIGHT ACK MESSAGE, GONNA STOP RETRANSMISSION !!!")
 				// qua non serve fare la removeresilianceentry?
 				break
 
 			} else if newErr, ok := newErr.(net.Error); ok && newErr.Timeout() {
-				fmt.Println("GOT TIMEOUTED AGAIN SO I WILL RETRY ONE TIME MORE !!!")
 				continue
 
 			} else {
-				fmt.Println("GOT BOT ERROR NOT RESPONDING SO I WILL RETRY LATER ON !!!")
 				time.Sleep(20 * time.Second)
 				continue
 			}
