@@ -14,6 +14,11 @@ import (
 	"time"
 )
 
+type TestPack struct {
+	TimesMeasurementsGC []float64 `json:"timelist"`
+	//Index int  					  `json:"index"`
+}
+
 // Ping
 type Ping struct {
 	CtxStatus string    `json:"status"`
@@ -46,11 +51,14 @@ type resilienceEntry struct {
 }
 
 var bots []Bot
+var sensCount = 0
 var topics []string
 var contextLock = false
 var dynamoDBSession *dynamodb.DynamoDB = nil
 var sensorRequest sync.WaitGroup
 var resilienceLock sync.WaitGroup
+var testPack TestPack
+var timesLock sync.RWMutex
 
 func main() {
 	router := mux.NewRouter()
@@ -81,6 +89,7 @@ func main() {
 
 	initTopics()
 
+	router.HandleFunc("/stats", getTimes).Methods("GET")
 	router.HandleFunc("/status", heartBeatMonitoring).Methods("GET")
 
 	router.HandleFunc("/unsubscribeBot", unsubscribeBot).Methods("POST")
@@ -103,10 +112,18 @@ func main() {
 			sensorRequest.Add(1)
 
 			go func(request Sensor) {
+				start := time.Now()
 
 				myRequest := request
 				sensorRequest.Done()
-				eb.Publish(myRequest)
+				eb.Publish(myRequest, start)
+
+				//end := time.Now()
+				//elapsed := end.Sub(start)
+
+				/*timesLock.Lock()
+				testPack.TimesMeasurementsGC = append(testPack.TimesMeasurementsGC, elapsed.Seconds())
+				timesLock.Unlock()*/
 
 			}(request)
 
@@ -143,6 +160,17 @@ func checkCli() {
 	}
 }
 
+// routine that returns service time for every pub served requests (time requests arrive - time all bots receive the message)
+func getTimes(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	snap := testPack
+	timesLock.Lock()
+	testPack.TimesMeasurementsGC = testPack.TimesMeasurementsGC[:0]
+	testPack.TimesMeasurementsGC = []float64{}
+	timesLock.Unlock()
+	json.NewEncoder(w).Encode(snap)
+}
+
 // function to ping the application
 func heartBeatMonitoring(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
@@ -154,7 +182,7 @@ func heartBeatMonitoring(w http.ResponseWriter, r *http.Request) {
 		pingNow.CtxStatus = "alive"
 	}
 	pingNow.TotBot = len(bots)
-	pingNow.TotSens = len(eb.sensorsRequest)
+	pingNow.TotSens = sensCount
 	json.NewEncoder(w).Encode(pingNow)
 }
 
@@ -176,12 +204,11 @@ func spawnSensor(w http.ResponseWriter, r *http.Request) {
 
 	var newSensor Sensor
 
-	//Genero un numero casuale tra 1 e 10 e se x>7 allora rispondo
-
 	json.NewDecoder(r.Body).Decode(&newSensor)
 
 	//check if sensor already in system
 	if newSensor.Id == "" {
+		sensCount++
 		newSensor.Id = shortuuid.New()
 	}
 
@@ -286,7 +313,7 @@ func checkResilience() {
 
 						wg.Add(1)
 
-						go publishImplementation(myBot, sensor, &wg)
+						go publishImplementation(myBot, sensor, &wg, time.Time{})
 					}
 
 				}
