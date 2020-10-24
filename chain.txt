@@ -2,8 +2,6 @@
 
 set AWS_REGION=us-east-2
 set AWS_SDK_LOAD_CONFIG=1
-set AWS_ACCESS_KEY_ID=AKIASH7XIDHWKRQQUHXG
-set AWS_SECRET_ACCESS_KEY=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
 
 go run http-api.go pubsub-system.go dynamo-db-repository.go      (senza contesto)
 go run http-api.go pubsub-system.go dynamo-db-repository.go ctx  (con contesto)
