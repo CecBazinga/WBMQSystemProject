@@ -16,7 +16,6 @@ import (
 
 type TestPack struct {
 	TimesMeasurementsGC []float64 `json:"timelist"`
-	//Index int  					  `json:"index"`
 }
 
 // Ping
@@ -51,7 +50,6 @@ type resilienceEntry struct {
 }
 
 var bots []Bot
-var sensCount = 0
 var topics []string
 var contextLock = false
 var dynamoDBSession *dynamodb.DynamoDB = nil
@@ -182,7 +180,6 @@ func heartBeatMonitoring(w http.ResponseWriter, r *http.Request) {
 		pingNow.CtxStatus = "alive"
 	}
 	pingNow.TotBot = len(bots)
-	pingNow.TotSens = sensCount
 	json.NewEncoder(w).Encode(pingNow)
 }
 
@@ -208,7 +205,6 @@ func spawnSensor(w http.ResponseWriter, r *http.Request) {
 
 	//check if sensor already in system
 	if newSensor.Id == "" {
-		sensCount++
 		newSensor.Id = shortuuid.New()
 	}
 

@@ -15,4 +15,3 @@ RUN apk update && \
 RUN GOOS=linux GOARCH=amd64 go build -o wbmq
 EXPOSE 5000
 CMD ["./wbmq", "ctx"]
-#ENTRYPOINT["./wbmq", "ctx"]
