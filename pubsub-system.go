@@ -96,9 +96,8 @@ func (eb *Broker) Subscribe(bot Bot) {
 	eb.rm.Unlock()
 }
 
-func (eb *Broker) Publish(sensor Sensor, start time.Time) {
+func (eb *Broker) Publish(sensor Sensor) {
 
-	myStart := start
 	localSensor := sensor
 	eb.rm.RLock()
 
@@ -127,7 +126,7 @@ func (eb *Broker) Publish(sensor Sensor, start time.Time) {
 				myBot := bot
 				wg.Add(1)
 
-				go publishImplementation(myBot, localSensor, &wg, myStart)
+				go publishImplementation(myBot, localSensor, &wg)
 
 			}
 			//wait all subroutines have received their acks
@@ -161,7 +160,7 @@ func (eb *Broker) Publish(sensor Sensor, start time.Time) {
 				myBot := bot
 				wg.Add(1)
 
-				go publishImplementation(myBot, localSensor, &wg, myStart)
+				go publishImplementation(myBot, localSensor, &wg)
 
 			}
 
@@ -182,22 +181,12 @@ func (eb *Broker) Publish(sensor Sensor, start time.Time) {
 }
 
 //retransmits a single message to a single bot until receives an ack from it (at least one semantic)
-func publishImplementation(bot Bot, sensor Sensor, wg *sync.WaitGroup, start time.Time) {
+func publishImplementation(bot Bot, sensor Sensor, wg *sync.WaitGroup) {
 
 	//subroutine awaits for the ack from the bot
-
 	myNewBot := bot
 	mySensor := sensor
 	myMessage := mySensor.Message
-
-	if !start.Equal(time.Time{}) {
-		myStart := start
-		end := time.Now()
-		elapsed := end.Sub(myStart)
-		timesLock.Lock()
-		testPack.TimesMeasurementsGC = append(testPack.TimesMeasurementsGC, elapsed.Seconds())
-		timesLock.Unlock()
-	}
 
 	//blocking call : go function awaits for response to its http request
 	response := newRequest(myNewBot, myMessage, mySensor)

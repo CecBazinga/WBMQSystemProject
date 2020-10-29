@@ -110,18 +110,10 @@ func main() {
 			sensorRequest.Add(1)
 
 			go func(request Sensor) {
-				start := time.Now()
 
 				myRequest := request
 				sensorRequest.Done()
-				eb.Publish(myRequest, start)
-
-				//end := time.Now()
-				//elapsed := end.Sub(start)
-
-				/*timesLock.Lock()
-				testPack.TimesMeasurementsGC = append(testPack.TimesMeasurementsGC, elapsed.Seconds())
-				timesLock.Unlock()*/
+				eb.Publish(myRequest)
 
 			}(request)
 
@@ -309,7 +301,7 @@ func checkResilience() {
 
 						wg.Add(1)
 
-						go publishImplementation(myBot, sensor, &wg, time.Time{})
+						go publishImplementation(myBot, sensor, &wg)
 					}
 
 				}
