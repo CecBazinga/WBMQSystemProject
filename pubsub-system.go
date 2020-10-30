@@ -41,20 +41,20 @@ func (eb *Broker) Unsubscribe(myBot Bot) {
 			Topic:  bot.Topic,
 			Sector: bot.CurrentSector,
 		}
-		// Trovo indice del bot
+		// Finding bot index
 		for k, theBot := range eb.subscribersCtx[internalKey] {
 			if theBot.Id == bot.Id {
-				// lo rimuovo
+				// remove bot
 				eb.subscribersCtx[internalKey] = append(eb.subscribersCtx[internalKey][:k], eb.subscribersCtx[internalKey][k+1:]...)
 				break
 			}
 		}
 
 	} else {
-		// Trovo indice del bot
+		// Finding bot index
 		for k, theBot := range eb.subscribers[bot.Topic] {
 			if theBot.Id == bot.Id {
-				// lo rimuovo
+				// remove bot
 				eb.subscribers[bot.Topic] = append(eb.subscribers[bot.Topic][:k], eb.subscribers[bot.Topic][k+1:]...)
 				break
 			}
@@ -107,14 +107,13 @@ func (eb *Broker) Publish(sensor Sensor) {
 			Sector: localSensor.CurrentSector,
 		}
 
+		// if eb map subscribersCtx contains current internal key, take the bot associated and process it
 		if notThebots, found := eb.subscribersCtx[internalKey]; found {
 
-			// this is done because the slices refer to same array even though they are passed by value
-			// thus we are creating a new slice with our elements thus preserve locking correctly.
 			myBots := append(BotSlice{}, notThebots...)
 			eb.rm.RUnlock()
 
-			//main subroutine spaws a subroutine for every bot who needs to be notified and awaits
+			//main subroutine spawn a subroutine for every bot who needs to be notified and awaits
 			//for every subroutine to receive its own ack
 
 			writeBotIdsAndMessage(myBots, localSensor)
@@ -140,14 +139,13 @@ func (eb *Broker) Publish(sensor Sensor) {
 
 	} else {
 
+		// if eb map subscribers contains current localSensor.Type, take the bot associated and process it
 		if notThebots, found := eb.subscribers[localSensor.Type]; found {
 
-			// this is done because the slices refer to same array even though they are passed by value
-			// thus we are creating a new slice with our elements thus preserve locking correctly.
 			myBots := append(BotSlice{}, notThebots...)
 			eb.rm.RUnlock()
 
-			//main subroutine spaws a subroutine for every bot who needs to be notified and awaits
+			//main subroutine spawn a subroutine for every bot who needs to be notified and awaits
 			//for every subroutine to receive its own ack
 
 			var wg sync.WaitGroup
@@ -208,8 +206,6 @@ func publishImplementation(bot Bot, sensor Sensor, wg *sync.WaitGroup) {
 
 			// got the right ack message so i cans top retransmitting
 			if newErr == nil && dataReceived.BotId == myNewBot.Id && dataReceived.Message == myMessage {
-
-				// qua non serve fare la removeresilianceentry?
 				break
 
 			} else if newErr, ok := newErr.(net.Error); ok && newErr.Timeout() {

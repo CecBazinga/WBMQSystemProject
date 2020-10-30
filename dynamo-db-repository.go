@@ -84,7 +84,7 @@ func GetResilienceEntries() ([]resilienceEntry, error) {
 	return resilienceList, nil
 }
 
-// return the list of sensor publish request which need to be retransmitted
+// return the list of sensor's publish requests which need to be retransmitted
 func GetRequestEntries() ([]Sensor, error) {
 	client := initDBClient()
 	params := &dynamodb.ScanInput{
@@ -130,7 +130,6 @@ func writeBotIdsAndMessage(botsArray []Bot, sensor Sensor) {
 
 	for _, bot := range botsArray {
 
-		//fmt.Println("Id number : " + bot.Id)
 		var item resilienceEntry
 		item.Id = bot.Id + sensor.Id
 		item.Message = sensor.Message
@@ -148,7 +147,7 @@ func writeBotIdsAndMessage(botsArray []Bot, sensor Sensor) {
 }
 
 //removes the entry (botId,message) from resilience table if bot identified by botId received correctly message
-//and answered with an ack to te sending goroutine
+//and answered with an ack to the current transmitting goroutine
 func removeResilienceEntry(botId string, message string, sensor string) {
 
 	client := initDBClient()
@@ -176,7 +175,7 @@ func removeResilienceEntry(botId string, message string, sensor string) {
 }
 
 //removes the entry (botId,message) from resilience table if bot identified by botId received correctly message
-//and answered with an ack to te sending goroutine
+//and answered with an ack to current transmitting goroutine
 func removePubRequest(sensorId string, message string) {
 
 	client := initDBClient()

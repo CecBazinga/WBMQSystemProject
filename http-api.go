@@ -76,8 +76,7 @@ func main() {
 
 	fmt.Println("System started working \n")
 
-	//get lock because i want to be sure no other function works on db in this moment, to get a copy of system's pre
-	//crash state
+	//get lock to make sure no other function works on db in this moment, to get a copy of system's pre-crash state
 	resilienceLock.Add(1)
 	go checkResilience()
 	fmt.Println("Waiting for checkresilience to read from DB")
@@ -95,13 +94,12 @@ func main() {
 
 	router.HandleFunc("/sensor", spawnSensor).Methods("POST")
 
-	// linea standard per mettere in ascolto l'app. TODO controllo d'errore
+	//standard line that listen to any request
 	go func() {
 		log.Fatal(http.ListenAndServe(":5000", router))
 	}()
 
-	//cicla sulla lista di richieste di tipo sensorRequests
-
+	//Main loop on sensorsRequest
 	for {
 
 		if len(eb.sensorsRequest) > 0 {
@@ -129,7 +127,7 @@ func main() {
 	}
 }
 
-// STATIC OBJECT IN THE SYSTEM
+//STATIC OBJECT IN THE SYSTEM
 func initTopics() {
 	topics = make([]string, 0)
 	topics = append(topics,
@@ -204,7 +202,7 @@ func spawnSensor(w http.ResponseWriter, r *http.Request) {
 	var ack = "Ack on message : " + msg + " on sensor :" + newSensor.Id
 
 	//check if message is a new message or a retransmission
-	//if PiggyBagRetransmission is true it means that message ahd already been transmitted so i do no op but ack
+	//if PiggyBagRetransmission is true it means that message had already been transmitted so do nothing but ack
 	if newSensor.Pbrtx {
 
 		//TODO funzione ricerca sensor request if found nothing, else eseguo servizio

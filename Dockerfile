@@ -1,5 +1,5 @@
 FROM golang:1.15.0-alpine
-LABEL maintainer="Roberto Pavia <robertopavia196@gmail.com>"
+LABEL maintainer="Alessandro Amici <alessandro.amici@alumni.uniroma2.eu>, Cecilia Calavaro <cecilia.calavaro@alumni.uniroma2.eu>, Roberto Pavia <roberto.pavia@alumni.uniroma2.eu>"
 RUN mkdir /app
 ADD . /app
 WORKDIR /app
