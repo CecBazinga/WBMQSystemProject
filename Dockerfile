@@ -1,4 +1,4 @@
-FROM golang:1.15.0-alpine
+FROM golang:1.15.0
 LABEL maintainer="Alessandro Amici <alessandro.amici@alumni.uniroma2.eu>, Cecilia Calavaro <cecilia.calavaro@alumni.uniroma2.eu>, Roberto Pavia <roberto.pavia@alumni.uniroma2.eu>"
 RUN mkdir /app
 ADD . /app
